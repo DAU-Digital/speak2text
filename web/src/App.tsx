@@ -2,14 +2,30 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import { SonioxClient } from "@soniox/client";
 import { ApiError, fetchSttKey, login } from "./api";
+import { createPublisher } from "./broadcast";
+import { floatingSupported, useFloatingWindow } from "./floatingWindow";
+import { isLang, LANGS, langShort, sanitizeTargets, type Lang } from "./languages";
 import { Listener, type ErrorKind, type Status } from "./listener";
 import { MSG } from "./messages";
 import { SharedMic } from "./sharedMic";
-import { floatingSupported, openFloatingWindow } from "./floatingWindow";
-import { SubtitleView } from "./SubtitleView";
-import { clearTranscript, currentSubtitle, emptyTranscript, type Lang } from "./subtitles";
+import { OneRow, SubtitleView } from "./SubtitleView";
+import { clearTranscript, currentSubtitle, emptyTranscript, type Subtitle, type Transcript } from "./subtitles";
 
-const LS = { token: "s2t.token", exp: "s2t.expiresAt", lang: "s2t.lang" };
+const LS = { token: "s2t.token", exp: "s2t.expiresAt", source: "s2t.source", targets: "s2t.targets" };
+
+function loadSource(): Lang {
+  const v = localStorage.getItem(LS.source);
+  return isLang(v) ? v : "en";
+}
+
+function loadTargets(source: Lang): Lang[] {
+  try {
+    const arr: unknown = JSON.parse(localStorage.getItem(LS.targets) ?? "[]");
+    return sanitizeTargets(source, Array.isArray(arr) ? arr.filter(isLang) : []);
+  } catch {
+    return sanitizeTargets(source, []);
+  }
+}
 
 function loadToken(): string | null {
   const token = localStorage.getItem(LS.token);
@@ -110,18 +126,21 @@ function Login({ initialMsg, onToken }: { initialMsg: string; onToken: (token: s
 }
 
 function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
-  const [lang, setLang] = useState<Lang>(() => (localStorage.getItem(LS.lang) === "ja" ? "ja" : "en"));
+  const [source, setSource] = useState<Lang>(loadSource);
+  const [targets, setTargets] = useState<Lang[]>(() => loadTargets(loadSource()));
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState<string | null>(null);
-  const [transcript, setTranscript] = useState(emptyTranscript);
-
-  const [floating, setFloating] = useState<Window | null>(null);
+  const [transcripts, setTranscripts] = useState<Partial<Record<Lang, Transcript>>>({});
+  const [floating, toggleFloating] = useFloatingWindow();
   const expired = useRef(onExpired);
   expired.current = onExpired;
 
+  const publisher = useRef<ReturnType<typeof createPublisher> | null>(null);
+  publisher.current ??= createPublisher();
+
   const listener = useRef<Listener | null>(null);
   listener.current ??= new Listener({
-    createRecording: (source, target, ctx, noteApiError) =>
+    createRecording: (src, target, ctx, noteApiError) =>
       new SonioxClient({
         config: async () => {
           try {
@@ -137,7 +156,7 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
         audio_format: "pcm_s16le",
         sample_rate: ctx.sampleRate,
         num_channels: 1,
-        language_hints: [source],
+        language_hints: [src],
         enable_endpoint_detection: true,
         translation: { type: "one_way", target_language: target },
         auto_reconnect: true,
@@ -148,7 +167,8 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
       setStatus(s);
       if (s === "connecting") setError(null);
     },
-    onTranscript: (_target, update) => setTranscript(update),
+    onTranscript: (target, update) =>
+      setTranscripts((ts) => ({ ...ts, [target]: update(ts[target] ?? emptyTranscript()) })),
     onError: (kind, err) => {
       if (err) console.error(err);
       if (kind === "expired") expired.current();
@@ -156,19 +176,46 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
     },
   });
 
+  function applyConfig(nextSource: Lang, nextTargets: Lang[]) {
+    const t = sanitizeTargets(nextSource, nextTargets);
+    localStorage.setItem(LS.source, nextSource);
+    localStorage.setItem(LS.targets, JSON.stringify(t));
+    setSource(nextSource);
+    setTargets(t);
+    if (listener.current!.current !== "idle") {
+      void listener.current!.restart({ source: nextSource, targets: t }, newAudioContext());
+    }
+  }
+
+  function toggleTarget(l: Lang) {
+    applyConfig(source, targets.includes(l) ? targets.filter((x) => x !== l) : [...targets, l]);
+  }
+
   function onMic() {
     const ls = listener.current!;
-    if (status === "idle") ls.start({ source: lang, targets: ["vi"] }, newAudioContext());
+    if (status === "idle") ls.start({ source, targets }, newAudioContext());
     else if (status === "listening") void ls.stop();
     else if (status === "reconnecting") ls.cancel();
   }
 
-  function onLang(l: Lang) {
-    if (l === lang) return;
-    localStorage.setItem(LS.lang, l);
-    setLang(l);
-    if (listener.current!.current !== "idle") void listener.current!.restart({ source: l, targets: ["vi"] }, newAudioContext());
+  function clearAll() {
+    setTranscripts((ts) => Object.fromEntries(Object.entries(ts).map(([k, t]) => [k, clearTranscript(t)])));
   }
+
+  function openPage(l: Lang) {
+    window.open(`/sub?lang=${l}`, `s2t-sub-${l}`, "popup,width=960,height=180");
+  }
+
+  const subs: Partial<Record<Lang, Subtitle | null>> = Object.fromEntries(
+    targets.map((t) => [t, currentSubtitle(transcripts[t] ?? emptyTranscript())]),
+  );
+  const first = subs[targets[0]] ?? null;
+
+  useEffect(() => {
+    publisher.current!.publish({ source, subs });
+    // subs is derived from these three
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transcripts, source, targets]);
 
   // Keep the screen on while listening; ignore browsers without Wake Lock.
   useEffect(() => {
@@ -185,55 +232,57 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
     };
   }, [status]);
 
-  useEffect(() => () => listener.current?.cancel(), []);
-
-  // The floating window closes itself when the user closes it or the page goes away.
-  useEffect(() => {
-    if (!floating) return;
-    const onClose = () => setFloating(null);
-    floating.addEventListener("pagehide", onClose);
-    return () => {
-      floating.removeEventListener("pagehide", onClose);
-      floating.close();
-    };
-  }, [floating]);
-
-  async function onFloat() {
-    if (floating) return setFloating(null);
-    try {
-      setFloating(await openFloatingWindow());
-    } catch (err) {
-      console.error(err);
-    }
-  }
-
-  const sub = currentSubtitle(transcript);
+  useEffect(
+    () => () => {
+      listener.current?.cancel();
+      publisher.current?.close();
+      publisher.current = null;
+    },
+    [],
+  );
 
   const statusText =
     status === "listening"
-      ? MSG.MSG03(lang)
+      ? MSG.MSG03(source)
       : status === "reconnecting"
         ? MSG.MSG04
         : status === "connecting"
           ? "Đang kết nối…"
           : status === "stopping"
             ? "Đang dừng…"
-            : (error ?? MSG.MSG11(lang));
+            : (error ?? MSG.MSG11(source));
 
   return (
     <div className="main">
       <header>
         <strong>Phụ đề</strong>
+        <label className="field">
+          Người nói
+          <select value={source} onChange={(e) => applyConfig(e.target.value as Lang, targets)}>
+            {LANGS.map((l) => (
+              <option key={l.code} value={l.code}>
+                {l.short}
+              </option>
+            ))}
+          </select>
+        </label>
         <div className="tools">
-          <button aria-pressed={lang === "en"} onClick={() => onLang("en")}>
-            Anh → Việt
-          </button>
-          <button aria-pressed={lang === "ja"} onClick={() => onLang("ja")}>
-            Nhật → Việt
-          </button>
-          <button onClick={() => setTranscript(clearTranscript)}>Xoá</button>
+          <span className="label">Dịch sang</span>
+          {LANGS.filter((l) => l.code !== source).map((l) => (
+            <button key={l.code} aria-pressed={targets.includes(l.code)} onClick={() => toggleTarget(l.code)}>
+              {l.short}
+            </button>
+          ))}
+        </div>
+        <div className="tools">
+          {targets.map((t) => (
+            <button key={t} onClick={() => openPage(t)}>
+              Mở trang {langShort(t)}
+            </button>
+          ))}
+          <button onClick={clearAll}>Xoá</button>
           {floatingSupported() && (
-            <button aria-pressed={!!floating} onClick={onFloat}>
+            <button aria-pressed={!!floating} onClick={toggleFloating}>
               Cửa sổ phụ đề
             </button>
           )}
@@ -241,9 +290,17 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
       </header>
 
       <div className="stage">
-        <SubtitleView sub={sub} />
+        <div className="sub" aria-live="polite">
+          {targets.map((t) => (
+            <div className="labeled" key={t}>
+              <span className="tag">{langShort(t)}</span>
+              <OneRow className="tr" text={subs[t]?.translation ?? ""} />
+            </div>
+          ))}
+          <OneRow className="orig" text={first?.original ?? ""} />
+        </div>
       </div>
-      {floating && createPortal(<SubtitleView sub={sub} floating />, floating.document.body)}
+      {floating && createPortal(<SubtitleView sub={first} floating />, floating.document.body)}
 
       <footer>
         <p className="status" role="status">

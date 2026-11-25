@@ -34,6 +34,18 @@ cd server && npx tsx --env-file=../.env scripts/trace.ts en   # và ja
 
 File ghi ra ở `web/src/fixtures/`; khi có file, test `trace EN/JA thật` trong `web/src/subtitles.test.ts` sẽ chạy.
 
+## Nhiều ngôn ngữ và trang chiếu
+
+- **Màn hình ghi âm:** chọn "Người nói" (Anh, Nhật, Việt, Trung, Hàn) và một hoặc nhiều ngôn ngữ "Dịch sang".
+  - Mỗi ngôn ngữ đầu ra là một phiên Soniox riêng, dùng chung micro, nên chi phí nhân theo số ngôn ngữ.
+  - Soniox cho tối đa 10 phiên cùng lúc.
+- **Trang chiếu:** "Mở trang <ngôn ngữ>" mở cửa sổ `/sub?lang=xx`, chỉ hiện phụ đề ngôn ngữ đó (bản dịch ở trên, câu gốc ở dưới).
+  - Kéo cửa sổ sang màn hình hoặc máy chiếu cần dùng.
+  - Trang nhận chữ từ tab ghi âm trên cùng trình duyệt, nên tab ghi âm phải luôn mở.
+- **Đè lên slide toàn màn hình:** dùng "Cửa sổ phụ đề" (ở màn hình ghi âm) hoặc "Nổi lên trên" (ở trang chiếu).
+  - Cửa sổ này luôn nằm trên cùng, chỉ có trên Chrome/Edge máy tính.
+  - Mỗi lúc chỉ mở được một cửa sổ nổi.
+
 ## Deploy lên VPS
 
 ```bash

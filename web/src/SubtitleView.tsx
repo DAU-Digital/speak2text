@@ -7,7 +7,7 @@ function showTail(el: HTMLElement) {
 }
 
 /** One text row; when too long, the start is clipped so the newest words stay visible. */
-function OneRow({ text, className }: { text: string; className: string }) {
+export function OneRow({ text, className }: { text: string; className: string }) {
   const ref = useRef<HTMLDivElement>(null);
 
   useLayoutEffect(() => {
