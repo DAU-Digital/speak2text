@@ -38,19 +38,6 @@ async function tokenFor(app: ReturnType<typeof makeApp>) {
   return res.body.token as string;
 }
 
-describe("rootRedirect", () => {
-  test("có rootRedirect → GET / chuyển sang trang app", async () => {
-    const res = await request(makeApp({ rootRedirect: "/app" })).get("/");
-    expect(res.status).toBe(302);
-    expect(res.headers.location).toBe("/app");
-  });
-
-  test("không có rootRedirect → GET / không chuyển hướng", async () => {
-    const res = await request(makeApp()).get("/");
-    expect(res.status).toBe(404);
-  });
-});
-
 describe("healthz", () => {
   test("healthz", async () => {
     const res = await request(makeApp()).get("/healthz");

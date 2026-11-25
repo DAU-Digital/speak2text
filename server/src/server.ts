@@ -1,21 +1,21 @@
-// Entry point for local runs, Docker and Vercel. Vercel imports this file and uses the default
-// export (it serves server/public from its CDN); everywhere else it listens on PORT.
+// Entry point for local runs and Docker: HTTP API + static web app + room WebSocket at /ws.
 import express from "express";
+import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { SonioxNodeClient } from "@soniox/node";
 import { loadConfig, type Config } from "./config.js";
 import { createApp } from "./createApp.js";
-
-const onVercel = !!process.env.VERCEL;
+import { RoomRegistry } from "./rooms.js";
+import { attachRooms } from "./roomsWs.js";
+import { verifyToken } from "./session.js";
 
 let config: Config;
 try {
   config = loadConfig(process.env);
 } catch (err) {
   console.error(err instanceof Error ? err.message : err);
-  if (onVercel) throw err;
   process.exit(1);
 }
 config.warnings.forEach((w) => console.warn(w));
@@ -30,8 +30,7 @@ app.use(
   createApp({
     passcode: config.passcode,
     sessionSecret: config.sessionSecret,
-    staticDir: !onVercel && existsSync(webDist) ? webDist : undefined,
-    rootRedirect: onVercel ? "/app" : undefined,
+    staticDir: existsSync(webDist) ? webDist : undefined,
     createSttKey: async () => {
       const { api_key, expires_at } = await soniox.auth.createTemporaryKey({
         usage_type: "transcribe_websocket",
@@ -44,4 +43,18 @@ app.use(
 
 export default app;
 
-if (!onVercel) app.listen(config.port, () => console.log(`listening on :${config.port}`));
+const httpServer = app.listen(config.port, () => console.log(`listening on :${config.port}`));
+const secret = config.sessionSecret;
+attachRooms(httpServer, {
+  registry: new RoomRegistry({
+    maxRooms: 200,
+    maxViewers: 500,
+    graceMs: 30 * 60_000,
+    now: Date.now,
+    newKey: () => randomBytes(16).toString("hex"),
+  }),
+  hostAuth: config.passcode ? (t) => !!t && verifyToken(secret, t, Date.now()) : undefined,
+  maxConnsPerIp: 20,
+  pingMs: 30_000,
+  sweepMs: 60_000,
+});
