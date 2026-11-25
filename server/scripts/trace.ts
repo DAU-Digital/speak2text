@@ -42,6 +42,9 @@ const results: RealtimeToken[][] = [];
 session.on("result", (r) => {
   if (r.tokens.length) results.push(r.tokens);
 });
+// The SDK strips <end> from result tokens and fires "endpoint" right after that result instead;
+// record it the way the web app feeds it to applyTokens.
+session.on("endpoint", () => results.push([{ text: "<end>", is_final: true } as RealtimeToken]));
 session.on("error", (e) => console.error("error:", e));
 
 await session.connect();

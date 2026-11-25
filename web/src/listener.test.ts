@@ -131,6 +131,18 @@ test("kết quả từng phiên vào đúng transcript của ngôn ngữ đó", 
   expect(lines("vi").map((l) => l.original)).toEqual(["B"]);
 });
 
+// SDK 2.6 strips <end> from result tokens and fires a separate "endpoint" event right after.
+test("endpoint của SDK kết thúc câu: câu sau sang dòng mới", () => {
+  const [a] = listen(cfg(["vi"], "en"));
+  a.emit("result", { tokens: [o("Good morning.")] });
+  a.emit("endpoint");
+  a.emit("result", { tokens: [o(" Today")] });
+  expect(lines("vi").map((l) => [l.original, l.closed])).toEqual([
+    ["Good morning.", true],
+    [" Today", false],
+  ]);
+});
+
 test("stop chờ mọi phiên xong mới về idle", async () => {
   const [a, b] = listen(cfg(["en", "vi"], "ja"));
   const done = listener.stop();

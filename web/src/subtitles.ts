@@ -1,9 +1,10 @@
 // Groups the Soniox token stream into subtitle lines.
 //
-// Observed order in real traces: NOT YET CAPTURED (Soniox account had no balance on 2026-11-25).
-// Rule until traces exist: final translation tokens go to the newest line of the current segment
-// (segment = tokens between two `<end>`s); if VI arrives after `<end>` and before the next
-// original token, it goes to the last line.
+// Observed order in real traces (fixtures/trace-en.json, trace-ja.json, 2026-11-25): a sentence's
+// original tokens, then its VI tokens (sometimes VI for the first half arrives mid-sentence), then
+// <end>. Rule: final translation tokens go to the newest line of the current segment (segment =
+// tokens between two `<end>`s); VI arriving after `<end>` and before the next original goes to the
+// last line.
 import type { RealtimeToken } from "@soniox/client";
 import type { Lang } from "./languages";
 
@@ -25,6 +26,9 @@ export function emptyTranscript(): Transcript {
 }
 
 const isTranslation = (t: RealtimeToken) => t.translation_status === "translation";
+
+/** Fed in on the SDK's "endpoint" event: the SDK strips the real <end> token from results. */
+export const END_TOKEN: RealtimeToken = { text: "<end>", is_final: true, confidence: 1 };
 
 export function applyTokens(t: Transcript, tokens: RealtimeToken[], lang: Lang): Transcript {
   const lines = t.lines.slice();

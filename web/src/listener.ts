@@ -3,7 +3,7 @@
 // touch the current one.
 import { AudioPermissionError, type RecordingState, type SonioxClient } from "@soniox/client";
 import { ApiError } from "./api";
-import { applyTokens, closeOpenLine, type Lang, type Transcript } from "./subtitles";
+import { applyTokens, closeOpenLine, END_TOKEN, type Lang, type Transcript } from "./subtitles";
 
 export type Status = "idle" | "connecting" | "listening" | "reconnecting" | "stopping";
 export type ErrorKind = "permission" | "expired" | "network" | "service";
@@ -159,6 +159,10 @@ export class Listener {
       const mine = () => isCurrent() && this.recs.get(target) === rec;
       rec.on("result", (r) => {
         if (mine()) this.deps.onTranscript(target, (t) => applyTokens(t, r.tokens, source));
+      });
+      // The SDK removes <end> from result tokens and fires "endpoint" right after that result.
+      rec.on("endpoint", () => {
+        if (mine()) this.deps.onTranscript(target, (t) => applyTokens(t, [END_TOKEN], source));
       });
       rec.on("session_restart", () => {
         if (mine()) this.deps.onTranscript(target, closeOpenLine);
