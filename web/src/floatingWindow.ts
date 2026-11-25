@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
 // Always-on-top subtitle window via Document Picture-in-Picture (Chrome/Edge desktop).
+import { useEffect, useState } from "react";
+import { tr } from "./i18n";
 type DocumentPip = { requestWindow(options?: { width?: number; height?: number }): Promise<Window> };
 
 const api = () => (window as unknown as { documentPictureInPicture?: DocumentPip }).documentPictureInPicture;
@@ -22,7 +23,7 @@ export async function openFloatingWindow(): Promise<Window> {
       pip.document.head.appendChild(link);
     }
   }
-  pip.document.title = "Phụ đề";
+  pip.document.title = tr().floatingTitle;
   pip.document.body.className = "pip";
   return pip;
 }

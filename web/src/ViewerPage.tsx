@@ -1,15 +1,18 @@
 import { useEffect, useRef, useState } from "react";
-import { isLang, LANGS, langName, type Lang } from "./languages";
+import { useT, type Strings } from "./i18n";
+import { isLang, LANGS, type Lang } from "./languages";
 import { connectViewer, normalizeRoomCode, type LinkStatus, type RoomInfo } from "./roomClient";
 import { SubtitleList } from "./SubtitleView";
 import type { DisplayLine } from "./subtitles";
-import { BrandMark, ClearIcon, ColumnHead } from "./ui";
+import { BrandMark, ClearIcon, ColumnHead, UiLangSwitch } from "./ui";
 
 const LS_LANGS = "s2t.viewerLangs";
 
-const ERROR_TEXT: Record<string, string> = {
-  invalid: "Mã phòng không hợp lệ. Kiểm tra lại link.",
-  full: "Phòng hoặc máy chủ đang đầy, thử lại sau ít phút.",
+type Fatal = "invalid" | "full" | "other";
+const FATAL_TEXT: Record<Fatal, (t: Strings) => string> = {
+  invalid: (t) => t.vInvalid,
+  full: (t) => t.vFull,
+  other: (t) => t.vFailed,
 };
 
 function loadLangs(): Lang[] {
@@ -24,6 +27,7 @@ function loadLangs(): Lang[] {
 
 /** Viewer page /r/<code>: pick one or more languages, each one is a live subtitle column. */
 export function ViewerPage({ code }: { code: string }) {
+  const t = useT();
   const [langs, setLangs] = useState<Lang[]>(loadLangs);
   const [info, setInfo] = useState<RoomInfo | null>(null);
   const [link, setLink] = useState<LinkStatus>("connecting");
@@ -31,11 +35,10 @@ export function ViewerPage({ code }: { code: string }) {
   const [lines, setLines] = useState<Partial<Record<Lang, DisplayLine[]>>>({});
   const [hidden, setHidden] = useState<Partial<Record<Lang, number[]>>>({});
   const valid = normalizeRoomCode(code) !== null;
-  const [fatal, setFatal] = useState<string | null>(valid ? null : ERROR_TEXT.invalid);
+  const [fatal, setFatal] = useState<Fatal | null>(valid ? null : "invalid");
   const conn = useRef<ReturnType<typeof connectViewer> | null>(null);
 
   useEffect(() => {
-    document.title = `Phòng ${code} — Phụ đề`;
     if (!valid) return;
     const c = connectViewer({
       room: code,
@@ -46,11 +49,15 @@ export function ViewerPage({ code }: { code: string }) {
         setLink(s);
         if (s === "open") setEverOpen(true);
       },
-      onError: (e) => setFatal(ERROR_TEXT[e] ?? "Không vào được phòng."),
+      onError: (e) => setFatal(e === "invalid" || e === "full" ? e : "other"),
     });
     conn.current = c;
     return () => c.close();
   }, [code, valid]);
+
+  useEffect(() => {
+    document.title = t.viewerTitle(code);
+  }, [t, code]);
 
   function toggle(l: Lang) {
     const next = LANGS.map((x) => x.code).filter((c) => (c === l ? !langs.includes(c) : langs.includes(c)));
@@ -66,18 +73,18 @@ export function ViewerPage({ code }: { code: string }) {
 
   const source = info?.source ?? null;
   const status = fatal
-    ? fatal
+    ? FATAL_TEXT[fatal](t)
     : link !== "open"
       ? everOpen
-        ? "Đang kết nối lại…"
-        : "Đang kết nối…"
+        ? t.vReconnecting
+        : t.vConnecting
       : !info?.exists
-        ? "Phòng chưa mở hoặc đã kết thúc"
+        ? t.vNotOpen
         : !info.hostOnline
-          ? "Chủ phòng đang mất kết nối…"
+          ? t.vHostLost
           : info.listening && source
-            ? `Đang nghe ${langName(source)}`
-            : "Chủ phòng đang tạm dừng";
+            ? t.vListening(source)
+            : t.vPaused;
 
   const live = !!info?.listening && link === "open";
   return (
@@ -86,30 +93,31 @@ export function ViewerPage({ code }: { code: string }) {
         <BrandMark />
         <div className="room">
           <span className="room-code">
-            <span className="eyebrow">Phòng</span> {code}
+            <span className="eyebrow">{t.room}</span> {code}
           </span>
           <span className={live ? "pill live" : fatal ? "pill bad" : "pill"}>{status}</span>
+          <UiLangSwitch />
         </div>
       </header>
       <div className="toolbar">
-        <div className="chips" role="group" aria-label="Ngôn ngữ muốn xem">
-          <span className="eyebrow">Xem</span>
+        <div className="chips" role="group" aria-label={t.show}>
+          <span className="eyebrow">{t.show}</span>
           {LANGS.map((l) => (
             <button key={l.code} aria-pressed={langs.includes(l.code)} onClick={() => toggle(l.code)}>
-              {l.short}
-              {l.code === source && <span className="badge">gốc</span>}
+              {t.langShort[l.code]}
+              {l.code === source && <span className="badge">{t.original}</span>}
             </button>
           ))}
         </div>
         <div className="actions">
           <button onClick={clear}>
-            <ClearIcon /> Xoá
+            <ClearIcon /> {t.clear}
           </button>
         </div>
       </div>
 
       {langs.length === 0 ? (
-        <p className="empty">Chọn ít nhất một ngôn ngữ để xem phụ đề.</p>
+        <p className="empty">{t.vPickOne}</p>
       ) : (
         <main className="cols">
           {langs.map((l) => {
@@ -122,7 +130,7 @@ export function ViewerPage({ code }: { code: string }) {
                 {shown.length ? (
                   <SubtitleList lines={shown} mode={l === source ? "original" : "translation"} />
                 ) : (
-                  <p className="empty">{waiting ? `Đang bật bản dịch ${langName(l)}…` : "Chưa có phụ đề."}</p>
+                  <p className="empty">{waiting ? t.vStarting(l) : t.vNoSubs}</p>
                 )}
               </section>
             );

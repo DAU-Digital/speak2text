@@ -4,9 +4,9 @@ import { SonioxClient } from "@soniox/client";
 import { ApiError, fetchSttKey, getConfig, login, retriableForSdk } from "./api";
 import { effectiveTargets } from "./demand";
 import { floatingSupported, useFloatingWindow } from "./floatingWindow";
-import { isLang, LANGS, langName, type Lang } from "./languages";
+import { isLang, LANGS, type Lang } from "./languages";
 import { Listener, type ErrorKind, type Status } from "./listener";
-import { MSG } from "./messages";
+import { tr, useT, type Strings } from "./i18n";
 import { createRoomPublisher } from "./publisher";
 import { SharedMic } from "./sharedMic";
 import { connectHost, normalizeRoomCode, roomLink, type LinkStatus } from "./roomClient";
@@ -22,6 +22,7 @@ import {
   MicIcon,
   SplitLayout,
   StopIcon,
+  UiLangSwitch,
   WindowIcon,
 } from "./ui";
 
@@ -66,10 +67,13 @@ function loadToken(): string | null {
   return token && exp > Date.now() ? token : null;
 }
 
-const ERROR_MSG: Record<Exclude<ErrorKind, "expired">, string> = {
-  permission: MSG.MSG02,
-  network: MSG.MSG05,
-  service: MSG.MSG10,
+/** A message shown later in whatever interface language is current then. */
+type Msg = (t: Strings) => string;
+
+const ERROR_MSG: Record<Exclude<ErrorKind, "expired">, Msg> = {
+  permission: (t) => t.MSG02,
+  network: (t) => t.MSG05,
+  service: (t) => t.MSG10,
 };
 
 const mics = new WeakMap<AudioContext, SharedMic>();
@@ -87,8 +91,12 @@ function newAudioContext(): AudioContext {
 }
 
 export default function App() {
+  const t = useT();
+  useEffect(() => {
+    document.title = t.hostTitle;
+  }, [t]);
   const [token, setToken] = useState(loadToken);
-  const [loginMsg, setLoginMsg] = useState("");
+  const [loginMsg, setLoginMsg] = useState<Msg | null>(null);
   // null = still asking the server; "" token = open mode (no passcode configured)
   const [passcodeRequired, setPasscodeRequired] = useState<boolean | null>(null);
 
@@ -108,7 +116,7 @@ export default function App() {
       <Main
         token=""
         onExpired={() => {
-          setLoginMsg(MSG.MSG09);
+          setLoginMsg(() => (t: Strings) => t.MSG09);
           setPasscodeRequired(true);
         }}
       />
@@ -122,7 +130,7 @@ export default function App() {
         onToken={(t, exp) => {
           localStorage.setItem(LS.token, t);
           localStorage.setItem(LS.exp, exp);
-          setLoginMsg("");
+          setLoginMsg(null);
           setToken(t);
         }}
       />
@@ -134,16 +142,17 @@ export default function App() {
       onExpired={() => {
         localStorage.removeItem(LS.token);
         localStorage.removeItem(LS.exp);
-        setLoginMsg(MSG.MSG09);
+        setLoginMsg(() => (t: Strings) => t.MSG09);
         setToken(null);
       }}
     />
   );
 }
 
-function Login({ initialMsg, onToken }: { initialMsg: string; onToken: (token: string, exp: string) => void }) {
+function Login({ initialMsg, onToken }: { initialMsg: Msg | null; onToken: (token: string, exp: string) => void }) {
+  const t = useT();
   const [passcode, setPasscode] = useState("");
-  const [msg, setMsg] = useState(initialMsg);
+  const [msg, setMsg] = useState<Msg | null>(() => initialMsg);
   const [busy, setBusy] = useState(false);
   const input = useRef<HTMLInputElement>(null);
 
@@ -155,7 +164,7 @@ function Login({ initialMsg, onToken }: { initialMsg: string; onToken: (token: s
       onToken(token, expiresAt);
     } catch (err) {
       const status = err instanceof ApiError ? err.status : 0;
-      setMsg(status === 401 ? MSG.MSG01 : status === 429 ? MSG.MSG08 : MSG.MSG10);
+      setMsg(() => (x: Strings) => (status === 401 ? x.MSG01 : status === 429 ? x.MSG08 : x.MSG10));
       setBusy(false);
       input.current?.focus();
     }
@@ -166,13 +175,13 @@ function Login({ initialMsg, onToken }: { initialMsg: string; onToken: (token: s
     <form className="stack" onSubmit={submit}>
       <BrandMark />
       <h2 className="welcome">
-        Chào mừng bạn đến với
+        {t.welcome}
         <br />
-        <span>Phòng phụ đề DAU</span>
+        <span>{t.welcomeName}</span>
       </h2>
-      <p className="lead">Nhập passcode để mở phòng phụ đề.</p>
+      <p className="lead">{t.loginLead}</p>
       <label className="eyebrow" htmlFor="passcode">
-        Passcode
+        {t.passcode}
       </label>
       <input
         id="passcode"
@@ -184,10 +193,10 @@ function Login({ initialMsg, onToken }: { initialMsg: string; onToken: (token: s
         onChange={(e) => setPasscode(e.target.value)}
       />
       <button type="submit" className="btn-primary btn-lg" disabled={busy || !passcode}>
-        Vào <ArrowIcon />
+        {t.enter} <ArrowIcon />
       </button>
       <p className="error" role="alert">
-        {msg}
+        {msg?.(t)}
       </p>
     </form>
     </SplitLayout>
@@ -201,7 +210,8 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
   const [source, setSource] = useState<Lang>(loadSource);
   const [hostTargets, setHostTargets] = useState<Lang[]>(loadTargets);
   const [status, setStatus] = useState<Status>("idle");
-  const [error, setError] = useState<string | null>(null);
+  const t = useT();
+  const [error, setError] = useState<Msg | null>(null);
   const [transcripts, setTranscripts] = useState<Partial<Record<Lang, Transcript>>>({});
   const [floating, toggleFloating] = useFloatingWindow();
   const [running, setRunning] = useState<Lang[]>([]);
@@ -209,7 +219,7 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
 
   const [roomInput, setRoomInput] = useState(() => localStorage.getItem(LS.room) ?? "");
   const [room, setRoom] = useState<RoomState | null>(null);
-  const [roomMsg, setRoomMsg] = useState<string | null>(null);
+  const [roomMsg, setRoomMsg] = useState<Msg | null>(null);
   const [viewers, setViewers] = useState(0);
   const [demand, setDemand] = useState<Lang[]>([]);
   const [shared, setShared] = useState(false);
@@ -260,18 +270,15 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
       setTranscripts((ts) => ({ ...ts, [target]: update(ts[target] ?? emptyTranscript()) })),
     onTargetFailed: (target, _kind, err) => {
       if (err) console.error(err);
-      setRoomMsg(
-        isConcurrencyLimit(err)
-          ? `Không bật được bản dịch ${langName(target)}: tài khoản Soniox đã chạm giới hạn số phiên cùng lúc.`
-          : `Không bật được bản dịch ${langName(target)}.`,
-      );
+      const limit = isConcurrencyLimit(err);
+      setRoomMsg(() => (x: Strings) => x.targetFailed(target, limit));
     },
     onError: (kind, err) => {
       if (err) console.error(err);
       if (isConcurrencyLimit(err)) {
-        setError("Tài khoản Soniox đã chạm giới hạn số phiên cùng lúc. Đóng bớt phòng hoặc nâng giới hạn trong Soniox Console.");
+        setError(() => (x: Strings) => x.concurrency);
       } else if (kind === "expired") expired.current();
-      else setError(ERROR_MSG[kind]);
+      else setError(() => ERROR_MSG[kind]);
     },
   });
 
@@ -298,7 +305,7 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
   function openRoom() {
     const code = normalizeRoomCode(roomInput);
     if (!code) {
-      setRoomMsg("Mã phòng chỉ gồm chữ thường, số và dấu -, dài 3–32 ký tự.");
+      setRoomMsg(() => (x: Strings) => x.roomInvalid);
       return;
     }
     setRoomMsg(null);
@@ -319,14 +326,14 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
         setViewers(d.viewers);
       },
       onError: (c) => {
-        if (c === "taken") setRoomMsg("Mã phòng này đang có người dùng. Chọn mã khác.");
+        if (c === "taken") setRoomMsg(() => (x: Strings) => x.roomTaken);
         else if (c === "replaced") {
-          setRoomMsg("Phòng này vừa được mở ở tab hoặc máy khác, tab này đã rời phòng.");
+          setRoomMsg(() => (x: Strings) => x.roomReplaced);
           listener.current!.cancel();
         }
         else if (c === "unauthorized") expired.current();
-        else if (c === "full") setRoomMsg("Máy chủ đang quá tải, thử lại sau.");
-        else setRoomMsg("Không mở được phòng.");
+        else if (c === "full") setRoomMsg(() => (x: Strings) => x.roomFull);
+        else setRoomMsg(() => (x: Strings) => x.roomFailed);
         host.current?.close();
         host.current = null;
         setRoom(null);
@@ -350,7 +357,7 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
     if (!room) return;
     const url = roomLink(location.origin, room.code);
     if (navigator.share) {
-      await navigator.share({ title: `Phụ đề trực tiếp — phòng ${room.code}`, url }).catch(() => {});
+      await navigator.share({ title: tr().shareTitle(room.code), url }).catch(() => {});
       return;
     }
     await navigator.clipboard?.writeText(url).catch(() => {});
@@ -440,16 +447,16 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
 
   const statusText =
     status === "listening"
-      ? MSG.MSG03(source)
+      ? t.MSG03(source)
       : status === "reconnecting"
-        ? MSG.MSG04
+        ? t.MSG04
         : status === "connecting"
-          ? "Đang kết nối…"
+          ? t.connecting
           : status === "stopping"
-            ? "Đang dừng…"
+            ? t.stopping
             : !room?.opened
-              ? "Mở phòng trước, rồi bấm micro để nghe."
-              : (error ?? MSG.MSG11(source));
+              ? t.openRoomFirst
+              : (error?.(t) ?? t.MSG11(source));
 
   if (!room) {
     return (
@@ -463,19 +470,17 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
         >
           <BrandMark />
           <h2 className="welcome">
-            Chào mừng bạn đến với
+            {t.welcome}
             <br />
-            <span>Phòng phụ đề DAU</span>
+            <span>{t.welcomeName}</span>
           </h2>
-          <p className="lead">
-            Nhập một mã phòng tuỳ ý rồi bấm Mở phòng. Người xem mở link chia sẻ và chọn ngôn ngữ muốn đọc.
-          </p>
+          <p className="lead">{t.landingLead}</p>
           <label className="eyebrow" htmlFor="room-code">
-            Mã phòng
+            {t.roomCode}
           </label>
           <input
             id="room-code"
-            placeholder="ví dụ: hop-thu-2"
+            placeholder={t.roomPlaceholder}
             value={roomInput}
             onChange={(e) => setRoomInput(e.target.value)}
             autoCapitalize="none"
@@ -483,21 +488,21 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
             spellCheck={false}
           />
           <button type="submit" className="btn-primary btn-lg" disabled={!roomInput.trim()}>
-            Mở phòng <ArrowIcon />
+            {t.openRoom} <ArrowIcon />
           </button>
           {roomMsg && (
             <p className="error" role="alert">
-              {roomMsg}
+              {roomMsg(t)}
             </p>
           )}
         </form>
         <div className="divider">
-          <span>Cách dùng</span>
+          <span>{t.howTo}</span>
         </div>
         <ol className="steps">
-          <li>Mở phòng với một mã dễ nhớ.</li>
-          <li>Chọn ngôn ngữ người nói, bấm micro và bắt đầu nói.</li>
-          <li>Bấm Chia sẻ, gửi link cho người xem.</li>
+          {t.steps.map((step) => (
+            <li key={step}>{step}</li>
+          ))}
         </ol>
       </SplitLayout>
     );
@@ -510,53 +515,54 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
         <BrandMark />
         <div className="room">
           <span className="room-code">
-            <span className="eyebrow">Phòng</span> {room.code}
+            <span className="eyebrow">{t.room}</span> {room.code}
           </span>
           <span className={room.link === "open" ? "pill live" : "pill"}>
-            {room.link === "open" ? `${viewers} người đang xem` : "Đang kết nối phòng…"}
+            {room.link === "open" ? t.viewers(viewers) : t.connectingRoom}
           </span>
+          <UiLangSwitch />
         </div>
         <div className="actions">
           <button className="btn-primary" onClick={share} disabled={!room.opened}>
-            <LinkIcon /> {shared ? "Đã chép link" : "Chia sẻ"}
+            <LinkIcon /> {shared ? t.copied : t.share}
           </button>
           <button onClick={leaveRoom}>
-            <LeaveIcon /> Rời phòng
+            <LeaveIcon /> {t.leave}
           </button>
         </div>
       </header>
       {roomMsg && (
         <p className="error banner" role="alert">
-          {roomMsg}
+          {roomMsg(t)}
         </p>
       )}
       <div className="toolbar">
         <label className="field">
-          <span className="eyebrow">Người nói</span>
+          <span className="eyebrow">{t.speaker}</span>
           <select value={source} onChange={(e) => changeSource(e.target.value as Lang)}>
             {LANGS.map((l) => (
               <option key={l.code} value={l.code}>
-                {l.short}
+                {t.langShort[l.code]}
               </option>
             ))}
           </select>
         </label>
-        <div className="chips" role="group" aria-label="Dịch sang">
-          <span className="eyebrow">Dịch sang</span>
+        <div className="chips" role="group" aria-label={t.translateTo}>
+          <span className="eyebrow">{t.translateTo}</span>
           {LANGS.filter((l) => l.code !== source).map((l) => (
             <button key={l.code} aria-pressed={hostTargets.includes(l.code)} onClick={() => toggleTarget(l.code)}>
-              {l.short}
-              {demand.includes(l.code) && <span className="badge">người xem</span>}
+              {t.langShort[l.code]}
+              {demand.includes(l.code) && <span className="badge">{t.viewerBadge}</span>}
             </button>
           ))}
         </div>
         <div className="actions">
           <button onClick={clearAll}>
-            <ClearIcon /> Xoá
+            <ClearIcon /> {t.clear}
           </button>
           {floatingSupported() && (
             <button className="pip-btn" aria-pressed={!!floating} onClick={toggleFloating}>
-              <WindowIcon /> Cửa sổ phụ đề
+              <WindowIcon /> {t.floating}
             </button>
           )}
         </div>
@@ -565,9 +571,11 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
       <main className="cols">
         {columns.length === 0 && (
           <div className="placeholder">
-            <span className="eyebrow">Phòng {room.code}</span>
-            <p>Phụ đề sẽ hiện ở đây</p>
-            <span>Bấm micro bên dưới để bắt đầu nghe.</span>
+            <span className="eyebrow">
+              {t.room} {room.code}
+            </span>
+            <p>{t.emptyTitle}</p>
+            <span>{t.emptyHint}</span>
           </div>
         )}
         {columns.map(({ lang, mode }) => (
@@ -585,7 +593,7 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
           className={`mic ${status}`}
           onClick={onMic}
           disabled={busy || (status === "idle" && !room.opened)}
-          aria-label={status === "idle" ? "Bắt đầu nghe" : "Dừng nghe"}
+          aria-label={status === "idle" ? t.micStart : t.micStop}
         >
           {busy ? <span className="spin" /> : status === "idle" ? <MicIcon /> : <StopIcon />}
         </button>

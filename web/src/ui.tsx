@@ -1,17 +1,18 @@
 // Shared look in the DAU Digital style: brand mark, split landing layout, line icons.
 import type { ReactNode } from "react";
-import { langName, type Lang } from "./languages";
+import { setUiLang, UI_LANGS, uiLang, useT } from "./i18n";
+import type { Lang } from "./languages";
 
 const YEAR = new Date().getFullYear();
-const COPYRIGHT = `© ${YEAR} Đại học Kiến trúc Đà Nẵng`;
 
 export function BrandMark() {
+  const t = useT();
   return (
     <div className="brand">
       <img src="/logo-dau.png" alt="" />
       <div>
         <div className="brand-name">DAU S2T</div>
-        <div className="brand-sub">Phụ đề trực tiếp</div>
+        <div className="brand-sub">{t.brandSub}</div>
       </div>
     </div>
   );
@@ -19,6 +20,7 @@ export function BrandMark() {
 
 /** Landing layout: brand panel on the left (hidden on phones), content and footer on the right. */
 export function SplitLayout({ children }: { children: ReactNode }) {
+  const t = useT();
   return (
     <div className="split">
       <aside className="hero">
@@ -31,17 +33,20 @@ export function SplitLayout({ children }: { children: ReactNode }) {
         </div>
         <div className="hero-copy">
           <h1>
-            Phụ đề trực tiếp
+            {t.heroTitle[0]}
             <br />
-            cho mọi bài giảng
+            {t.heroTitle[1]}
           </h1>
-          <p>Người nói dùng ngôn ngữ nào, người nghe cũng đọc được tiếng của mình, ngay khi lời vừa nói ra.</p>
+          <p>{t.heroText}</p>
         </div>
-        <p className="hero-foot">{COPYRIGHT}</p>
+        <p className="hero-foot">{t.copyright(YEAR)}</p>
       </aside>
       <div className="split-main">
+        <div className="split-top">
+          <UiLangSwitch />
+        </div>
         <div className="split-body">{children}</div>
-        <footer className="split-foot">{COPYRIGHT}</footer>
+        <footer className="split-foot">{t.copyright(YEAR)}</footer>
       </div>
     </div>
   );
@@ -102,12 +107,28 @@ export const ArrowIcon = () => (
   </Svg>
 );
 
-/** Column title in the small-caps style, e.g. "TIẾNG VIỆT", with a "gốc" badge for the speaker's language. */
+/** Column title in the small-caps style, e.g. "VIETNAMESE", with a badge for the speaker's language. */
 export function ColumnHead({ lang, original }: { lang: Lang; original: boolean }) {
+  const t = useT();
   return (
     <div className="col-head">
-      <span>{langName(lang)}</span>
-      {original && <span className="badge">gốc</span>}
+      <span>{t.langName[lang]}</span>
+      {original && <span className="badge">{t.original}</span>}
+    </div>
+  );
+}
+
+/** EN | VI segmented switch for the interface language. */
+export function UiLangSwitch() {
+  const t = useT();
+  const current = uiLang();
+  return (
+    <div className="ui-switch" role="group" aria-label={t.uiLangLabel}>
+      {UI_LANGS.map((l) => (
+        <button key={l} aria-pressed={l === current} onClick={() => setUiLang(l)}>
+          {l.toUpperCase()}
+        </button>
+      ))}
     </div>
   );
 }
