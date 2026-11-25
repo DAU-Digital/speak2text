@@ -34,3 +34,8 @@ test("PORT mặc định 3000", () => {
   expect(loadConfig(base).port).toBe(3000);
   expect(loadConfig({ ...base, PORT: "8080" }).port).toBe(8080);
 });
+
+test("production không có APP_PASSCODE nhưng ALLOW_NO_PASSCODE=1 → chạy, không passcode", () => {
+  const c = loadConfig({ ...base, NODE_ENV: "production", ALLOW_NO_PASSCODE: "1", SESSION_SECRET: "s".repeat(32) });
+  expect(c.passcode).toBeUndefined();
+});

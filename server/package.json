@@ -6,7 +6,8 @@
     "dev": "tsx watch --env-file=../.env src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "test": "vitest run"
+    "test": "vitest run",
+    "vercel-build": "npm --prefix ../web ci && npm --prefix ../web run build && rm -rf public && cp -R ../web/dist public"
   },
   "dependencies": {
     "@soniox/node": "^2.6.0",

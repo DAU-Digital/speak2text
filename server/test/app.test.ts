@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from "vitest";
 import request from "supertest";
-import { createApp, type AppDeps } from "../src/app.js";
+import { createApp, type AppDeps } from "../src/createApp.js";
 
 const SECRET = "x".repeat(32);
 const PASS = "secret-pass";

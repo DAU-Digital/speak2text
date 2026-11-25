@@ -13,7 +13,7 @@ Tạo `.env` ở thư mục gốc (xem `.env.example`):
 | Biến | Ý nghĩa |
 | --- | --- |
 | `SONIOX_API_KEY` | API key Soniox (bắt buộc) |
-| `APP_PASSCODE` | Passcode dùng chung, ≥ 8 ký tự. Bỏ trống thì app vào thẳng, không hỏi passcode, ai mở được trang cũng dùng được. Riêng production (`NODE_ENV=production`, ví dụ trong Docker) bắt buộc phải đặt |
+| `APP_PASSCODE` | Passcode dùng chung, ≥ 8 ký tự. Bỏ trống thì app vào thẳng, không hỏi passcode. Riêng production (`NODE_ENV=production`: Docker, Vercel) bắt buộc phải đặt, trừ khi đặt `ALLOW_NO_PASSCODE=1` |
 | `SESSION_SECRET` | Chuỗi ngẫu nhiên ≥ 32 ký tự. Bỏ trống thì mỗi lần restart phải đăng nhập lại |
 | `PORT` | Mặc định 3000 |
 
@@ -45,6 +45,29 @@ File ghi ra ở `web/src/fixtures/`; khi có file, test `trace EN/JA thật` tro
 - **Đè lên slide toàn màn hình:** dùng "Cửa sổ phụ đề" (ở màn hình ghi âm) hoặc "Nổi lên trên" (ở trang chiếu).
   - Cửa sổ này luôn nằm trên cùng, chỉ có trên Chrome/Edge máy tính.
   - Mỗi lúc chỉ mở được một cửa sổ nổi.
+
+## Deploy lên Vercel
+
+Lúc import repo trên Vercel:
+
+| Mục | Giá trị |
+| --- | --- |
+| Application Preset | **Express** |
+| Root Directory | `server` (giữ bật "Include files outside the root directory" vì build cần `web/`) |
+| Build Command | để mặc định (đọc từ `server/vercel.json`: `npm run vercel-build`) |
+
+Environment Variables cho môi trường Production:
+
+| Biến | Giá trị |
+| --- | --- |
+| `SONIOX_API_KEY` | key Soniox |
+| `SESSION_SECRET` | chuỗi ngẫu nhiên ≥ 32 ký tự (bắt buộc: Vercel chạy nhiều instance) |
+| `APP_PASSCODE` | passcode ≥ 8 ký tự, **hoặc** thay bằng `ALLOW_NO_PASSCODE=1` để ai có link cũng dùng được |
+
+Lưu ý:
+- `vercel-build` build `web/` rồi copy vào `server/public/`, và Vercel phục vụ thư mục này qua CDN.
+- `server/src/index.ts` export app cho Vercel.
+- Giới hạn đoán passcode và giới hạn xin key chỉ tính trong từng instance.
 
 ## Deploy lên VPS
 
