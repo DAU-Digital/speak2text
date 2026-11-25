@@ -9,6 +9,8 @@ export type AppDeps = {
   createSttKey: () => Promise<{ apiKey: string; expiresAt: string }>;
   now?: () => number;
   staticDir?: string;
+  /** Where GET / redirects (Vercel routes / to the function, so the page is served at another path). */
+  rootRedirect?: string;
 };
 
 const SESSION_MS = 30 * 24 * 3600 * 1000;
@@ -21,6 +23,11 @@ export function createApp(deps: AppDeps): express.Express {
   const app = express();
   app.set("trust proxy", 1);
   app.use(express.json({ limit: "4kb" }));
+
+  if (deps.rootRedirect) {
+    const target = deps.rootRedirect;
+    app.get("/", (_req, res) => res.redirect(302, target));
+  }
 
   app.get("/healthz", (_req, res) => {
     res.json({ ok: true });

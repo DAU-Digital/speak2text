@@ -8,7 +8,7 @@ const saved = { ...process.env };
 
 beforeAll(async () => {
   Object.assign(process.env, { VERCEL: "1", SONIOX_API_KEY: "k", APP_PASSCODE: "", NODE_ENV: "test" });
-  app = (await import("../src/index.js")).default;
+  app = (await import("../src/server.js")).default;
 });
 
 afterAll(() => {

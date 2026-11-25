@@ -66,7 +66,7 @@ Environment Variables cho môi trường Production:
 
 Lưu ý:
 - `vercel-build` build `web/` rồi copy vào `server/public/`, và Vercel phục vụ thư mục này qua CDN.
-- `server/src/index.ts` export app cho Vercel.
+- `server/src/server.ts` export app cho Vercel (không đặt tên `index.ts`: Vercel sẽ gắn function vào `/` và che mất trang chính).
 - Giới hạn đoán passcode và giới hạn xin key chỉ tính trong từng instance.
 
 ## Deploy lên VPS

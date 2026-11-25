@@ -31,6 +31,7 @@ app.use(
     passcode: config.passcode,
     sessionSecret: config.sessionSecret,
     staticDir: !onVercel && existsSync(webDist) ? webDist : undefined,
+    rootRedirect: onVercel ? "/app" : undefined,
     createSttKey: async () => {
       const { api_key, expires_at } = await soniox.auth.createTemporaryKey({
         usage_type: "transcribe_websocket",
