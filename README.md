@@ -1,1 +1,52 @@
-# speak2text
+# speak2text — Phụ đề trực tiếp EN/JA → VI
+
+Web app mở trên điện thoại: bấm micro, nghe tiếng Anh hoặc tiếng Nhật, hiện phụ đề tiếng Việt kèm câu gốc.
+Nhận giọng nói và dịch bằng Soniox real-time (`stt-rt-v6`). Audio đi thẳng từ trình duyệt tới Soniox, server chỉ giữ API key và cấp temporary key 60 giây.
+
+- Thiết kế: `docs/superpowers/specs/2026-11-25-live-subtitles-design.md`
+- Kế hoạch: `docs/superpowers/plans/2026-11-25-live-subtitles.md`
+
+## Cấu hình
+
+Tạo `.env` ở thư mục gốc (xem `.env.example`):
+
+| Biến | Ý nghĩa |
+| --- | --- |
+| `SONIOX_API_KEY` | API key Soniox (bắt buộc) |
+| `APP_PASSCODE` | Passcode dùng chung, ≥ 8 ký tự. Bỏ trống = dev mode, passcode nào cũng vào |
+| `SESSION_SECRET` | Chuỗi ngẫu nhiên ≥ 32 ký tự. Bỏ trống thì mỗi lần restart phải đăng nhập lại |
+| `PORT` | Mặc định 3000 |
+
+## Chạy dev
+
+```bash
+cd server && npm i && npm run dev      # API ở :3000
+cd web && npm i && npm run dev         # giao diện ở :5173, proxy /api sang :3000
+```
+
+Test: `cd server && npm test`, `cd web && npm test`.
+
+Ghi lại token stream thật của Soniox (dùng giọng đọc macOS, không cần micro):
+
+```bash
+cd server && npx tsx --env-file=../.env scripts/trace.ts en   # và ja
+```
+
+File ghi ra ở `web/src/fixtures/`; khi có file, test `trace EN/JA thật` trong `web/src/subtitles.test.ts` sẽ chạy.
+
+## Deploy lên VPS
+
+```bash
+docker build -t speak2text .
+docker run -d --restart unless-stopped -p 127.0.0.1:3000:3000 --env-file .env --name speak2text speak2text
+```
+
+Đặt nginx phía trước theo `deploy/nginx.conf.example` và bật HTTPS bằng certbot. Trình duyệt chỉ cho dùng micro trên HTTPS.
+
+## Kiểm tra trên máy thật
+
+1. Android Chrome và iPhone Safari: nói vài câu EN, mỗi câu ra một dòng VI.
+2. Đổi sang "Nhật → Việt" khi đang nghe, nói tiếng Nhật: phụ đề vẫn ra mà không bấm micro lại.
+3. Bật chế độ máy bay vài giây khi đang nghe rồi tắt: thấy "Mất kết nối, đang nối lại…", sau đó nghe tiếp.
+4. Để máy nghe 10 phút không chạm: màn hình không tắt.
+5. Nhập sai passcode 5 lần: thấy "Nhập sai quá nhiều lần. Thử lại sau 5 phút."
