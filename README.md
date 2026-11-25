@@ -61,7 +61,7 @@ rsync -az --delete --exclude node_modules --exclude dist --exclude server/public
 cd /home/higio/speak2text && docker compose -f deploy/docker-compose.vps.yml up -d --build
 ```
 
-`/home/higio/speak2text/.env` trên VPS chứa `SONIOX_API_KEY`, `SESSION_SECRET` và `ALLOW_NO_PASSCODE=1`. Muốn bật passcode cho chủ phòng thì thay `ALLOW_NO_PASSCODE` bằng `APP_PASSCODE=...` rồi chạy lại lệnh `up -d`.
+`/home/higio/speak2text/.env` trên VPS chứa `SONIOX_API_KEY`, `SESSION_SECRET` và `APP_PASSCODE`. Chủ phòng phải nhập passcode mới mở được phòng; người xem vào link chia sẻ không cần passcode. Đổi passcode: sửa dòng `APP_PASSCODE=` rồi chạy lại lệnh `up -d --force-recreate`.
 
 ## Kiểm tra trên máy thật
 
