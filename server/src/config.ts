@@ -16,7 +16,7 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
   const passcode = env.APP_PASSCODE || undefined;
   if (!passcode) {
     if (env.NODE_ENV === "production") throw new Error("APP_PASSCODE is required in production");
-    warnings.push("APP_PASSCODE not set: dev mode, any passcode is accepted");
+    warnings.push("APP_PASSCODE not set: dev mode, no passcode screen, anyone who can reach the server can use it");
   } else if (passcode.length < 8) {
     warnings.push("APP_PASSCODE should be at least 8 characters");
   }

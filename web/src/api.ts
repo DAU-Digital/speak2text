@@ -25,6 +25,18 @@ async function post<T>(url: string, init: { body?: unknown; token?: string } = {
   return (await res.json()) as T;
 }
 
+/** Whether the server wants a passcode; when it doesn't, the app skips the passcode screen. */
+export async function getConfig(): Promise<{ passcodeRequired: boolean }> {
+  let res: Response;
+  try {
+    res = await fetch("/api/config");
+  } catch (err) {
+    throw new ApiError(0, err instanceof Error ? err.message : "network error");
+  }
+  if (!res.ok) throw new ApiError(res.status);
+  return (await res.json()) as { passcodeRequired: boolean };
+}
+
 export function login(passcode: string): Promise<{ token: string; expiresAt: string }> {
   return post("/api/login", { body: { passcode } });
 }

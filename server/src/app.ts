@@ -26,6 +26,10 @@ export function createApp(deps: AppDeps): express.Express {
     res.json({ ok: true });
   });
 
+  app.get("/api/config", (_req, res) => {
+    res.json({ passcodeRequired: deps.passcode !== undefined });
+  });
+
   app.post("/api/login", (req, res) => {
     const ip = req.ip ?? "unknown";
     const t = now();
@@ -48,11 +52,12 @@ export function createApp(deps: AppDeps): express.Express {
     const auth = req.get("authorization") ?? "";
     const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
     const t = now();
-    if (!token || !verifyToken(deps.sessionSecret, token, t)) {
+    const open = deps.passcode === undefined; // no passcode configured: anyone may use the app
+    if (!open && (!token || !verifyToken(deps.sessionSecret, token, t))) {
       res.status(401).json({ error: "unauthorized" });
       return;
     }
-    if (!keyLimiter.allow(token, t)) {
+    if (!keyLimiter.allow(open ? `ip:${req.ip ?? "unknown"}` : token, t)) {
       res.status(429).json({ error: "rate_limited" });
       return;
     }

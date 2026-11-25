@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import { SonioxClient } from "@soniox/client";
-import { ApiError, fetchSttKey, login, retriableForSdk } from "./api";
+import { ApiError, fetchSttKey, getConfig, login, retriableForSdk } from "./api";
 import { useSubtitlePublisher } from "./broadcast";
 import { floatingSupported, useFloatingWindow } from "./floatingWindow";
 import { isLang, LANGS, langShort, sanitizeTargets, type Lang } from "./languages";
@@ -56,8 +56,33 @@ function newAudioContext(): AudioContext {
 export default function App() {
   const [token, setToken] = useState(loadToken);
   const [loginMsg, setLoginMsg] = useState("");
+  // null = still asking the server; "" token = open mode (no passcode configured)
+  const [passcodeRequired, setPasscodeRequired] = useState<boolean | null>(null);
 
+  useEffect(() => {
+    if (token) return;
+    let alive = true;
+    getConfig()
+      .then((c) => alive && setPasscodeRequired(c.passcodeRequired))
+      .catch(() => alive && setPasscodeRequired(true));
+    return () => {
+      alive = false;
+    };
+  }, [token]);
+
+  if (!token && passcodeRequired === false) {
+    return (
+      <Main
+        token=""
+        onExpired={() => {
+          setLoginMsg(MSG.MSG09);
+          setPasscodeRequired(true);
+        }}
+      />
+    );
+  }
   if (!token) {
+    if (passcodeRequired === null) return null;
     return (
       <Login
         initialMsg={loginMsg}

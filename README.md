@@ -13,7 +13,7 @@ Tạo `.env` ở thư mục gốc (xem `.env.example`):
 | Biến | Ý nghĩa |
 | --- | --- |
 | `SONIOX_API_KEY` | API key Soniox (bắt buộc) |
-| `APP_PASSCODE` | Passcode dùng chung, ≥ 8 ký tự. Bỏ trống = dev mode, passcode nào cũng vào |
+| `APP_PASSCODE` | Passcode dùng chung, ≥ 8 ký tự. Bỏ trống thì app vào thẳng, không hỏi passcode, ai mở được trang cũng dùng được. Riêng production (`NODE_ENV=production`, ví dụ trong Docker) bắt buộc phải đặt |
 | `SESSION_SECRET` | Chuỗi ngẫu nhiên ≥ 32 ký tự. Bỏ trống thì mỗi lần restart phải đăng nhập lại |
 | `PORT` | Mặc định 3000 |
 

@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { NetworkError } from "@soniox/client";
-import { ApiError, fetchSttKey, login, retriableForSdk } from "./api";
+import { ApiError, fetchSttKey, getConfig, login, retriableForSdk } from "./api";
 
 const respond = (status: number, body: unknown) =>
   vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify(body), { status }));
@@ -57,4 +57,18 @@ test("lỗi mạng, 429, 5xx khi xin key → NetworkError để SDK tự thử l
 test("401 giữ nguyên ApiError để báo hết phiên đăng nhập", () => {
   const err = new ApiError(401);
   expect(retriableForSdk(err)).toBe(err);
+});
+
+test("getConfig đọc passcodeRequired", async () => {
+  const f = respond(200, { passcodeRequired: false });
+  vi.stubGlobal("fetch", f);
+  expect(await getConfig()).toEqual({ passcodeRequired: false });
+  expect(f.mock.calls[0][0]).toBe("/api/config");
+});
+
+test("fetchSttKey không có token thì không gửi Authorization", async () => {
+  const f = respond(200, { apiKey: "k" });
+  vi.stubGlobal("fetch", f);
+  expect(await fetchSttKey("")).toBe("k");
+  expect(new Headers(f.mock.calls[0][1]?.headers).has("Authorization")).toBe(false);
 });

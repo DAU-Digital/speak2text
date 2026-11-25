@@ -95,7 +95,33 @@ describe("login", () => {
   });
 });
 
+describe("config", () => {
+  test("có passcode → passcodeRequired true", async () => {
+    const res = await request(makeApp()).get("/api/config");
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ passcodeRequired: true });
+  });
+
+  test("không đặt passcode → passcodeRequired false", async () => {
+    const res = await request(makeApp({ passcode: undefined })).get("/api/config");
+    expect(res.body).toEqual({ passcodeRequired: false });
+  });
+});
+
 describe("stt-key", () => {
+  test("không đặt passcode → stt-key không cần token", async () => {
+    const res = await request(makeApp({ passcode: undefined })).post("/api/stt-key");
+    expect(res.status).toBe(200);
+    expect(res.body.apiKey).toBe("tmp-123");
+  });
+
+  test("không đặt passcode vẫn giới hạn 60 key/phút theo IP", async () => {
+    const app = makeApp({ passcode: undefined });
+    const call = () => request(app).post("/api/stt-key").set("X-Forwarded-For", "5.5.5.5");
+    for (let i = 0; i < 60; i++) expect((await call()).status).toBe(200);
+    expect((await call()).status).toBe(429);
+  });
+
   test("stt-key không có token → 401", async () => {
     const res = await request(makeApp()).post("/api/stt-key");
     expect(res.status).toBe(401);
