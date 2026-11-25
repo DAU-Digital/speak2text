@@ -3,3 +3,5 @@ dist
 .env
 .superpowers/
 server/public
+.vercel
+.env*
