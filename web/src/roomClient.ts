@@ -16,6 +16,14 @@ export type LinkStatus = "connecting" | "open" | "closed";
 const BACKOFF_MS = [1000, 2000, 4000, 8000, 10000];
 const FATAL = new Set(["taken", "unauthorized", "invalid", "full"]);
 
+/** Same rule as the server: lowercase a-z, 0-9 and "-", 3–32 characters. */
+export function normalizeRoomCode(raw: string): string | null {
+  const code = raw.trim().toLowerCase();
+  return /^[a-z0-9-]{3,32}$/.test(code) ? code : null;
+}
+
+export const roomLink = (origin: string, code: string): string => `${origin}/r/${code}`;
+
 export function wsUrl(): string {
   return `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/ws`;
 }

@@ -1,11 +1,10 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
-import { isLang } from "./languages";
-import { SubPage } from "./SubPage";
+import { ViewerPage } from "./ViewerPage";
 import "./index.css";
 
-const lang = new URLSearchParams(location.search).get("lang");
-const page = location.pathname === "/sub" ? <SubPage lang={isLang(lang) ? lang : "vi"} /> : <App />;
+const room = /^\/r\/([^/]+)\/?$/.exec(location.pathname)?.[1];
+const page = room ? <ViewerPage code={decodeURIComponent(room).toLowerCase()} /> : <App />;
 
 createRoot(document.getElementById("root")!).render(<StrictMode>{page}</StrictMode>);

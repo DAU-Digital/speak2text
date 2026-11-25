@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { connectHost, connectViewer } from "./roomClient";
+import { connectHost, connectViewer, normalizeRoomCode, roomLink } from "./roomClient";
 
 class FakeSocket {
   static all: FakeSocket[] = [];
@@ -141,4 +141,13 @@ test("viewer setLangs gửi langs, nối lại vẫn giữ langs mới", () => {
   vi.advanceTimersByTime(1000);
   last().open();
   expect(last().sent[0]).toEqual({ t: "viewer", room: "hop", langs: ["vi", "en"] });
+});
+
+test("normalizeRoomCode giống server", () => {
+  expect(normalizeRoomCode(" Hop-Thu-2 ")).toBe("hop-thu-2");
+  for (const bad of ["ab", "a b c", "x".repeat(33), "héllo"]) expect(normalizeRoomCode(bad)).toBeNull();
+});
+
+test("roomLink tạo link /r/<mã>", () => {
+  expect(roomLink("https://s2t.example.com", "hop")).toBe("https://s2t.example.com/r/hop");
 });

@@ -5,7 +5,16 @@ import type { DisplayLine } from "./subtitles";
  * Recent subtitle lines, translation above original, newest at the bottom. Scrolls to the newest
  * line automatically unless the reader has scrolled up to look back.
  */
-export function SubtitleList({ lines, floating = false }: { lines: DisplayLine[]; floating?: boolean }) {
+export function SubtitleList({
+  lines,
+  floating = false,
+  mode = "translation",
+}: {
+  lines: DisplayLine[];
+  floating?: boolean;
+  /** "original": a speaker-language column, the original text is the main line. */
+  mode?: "translation" | "original";
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
 
@@ -37,8 +46,14 @@ export function SubtitleList({ lines, floating = false }: { lines: DisplayLine[]
     >
       {lines.map((l, i) => (
         <div key={l.id} className={i === lines.length - 1 ? "line latest" : "line"}>
-          <div className="tr">{l.translation || "…"}</div>
-          {l.original && <div className="orig">{l.original}</div>}
+          {mode === "original" ? (
+            <div className="tr">{l.original || "…"}</div>
+          ) : (
+            <>
+              <div className="tr">{l.translation || "…"}</div>
+              {l.original && <div className="orig">{l.original}</div>}
+            </>
+          )}
         </div>
       ))}
     </div>
