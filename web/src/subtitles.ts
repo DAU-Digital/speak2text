@@ -56,10 +56,8 @@ export function applyTokens(t: Transcript, tokens: RealtimeToken[], lang: Lang):
     if (isTranslation(tok)) {
       let idx = segLineId === null ? -1 : lines.findIndex((l) => l.id === segLineId);
       if (idx === -1) idx = lines.length - 1;
-      if (idx === -1) {
-        openLine();
-        idx = 0;
-      }
+      // No line to attach to (e.g. the screen was just cleared): drop it rather than show VI alone.
+      if (idx === -1) continue;
       lines[idx] = { ...lines[idx], vi: lines[idx].vi + tok.text };
       continue;
     }
@@ -86,4 +84,29 @@ export function closeOpenLine(t: Transcript): Transcript {
   const l = lines[lines.length - 1];
   if (l && !l.closed) lines[lines.length - 1] = { ...l, closed: true };
   return { ...t, lines, interimOriginal: "", interimVi: "", segLineId: null };
+}
+
+/** Empties the screen but keeps the id counter, so React keys never repeat. */
+export function clearTranscript(t: Transcript): Transcript {
+  return { ...emptyTranscript(), nextId: t.nextId };
+}
+
+export type Subtitle = { original: string; vi: string; live: boolean };
+
+/** The single subtitle to show: the sentence being spoken, else the last finished one. */
+export function currentSubtitle(t: Transcript): Subtitle | null {
+  const last = t.lines[t.lines.length - 1];
+  const open = last && !last.closed ? last : null;
+  const hasInterim = (t.interimOriginal + t.interimVi).trim().length > 0;
+  let sub: Subtitle | null = null;
+  if (open || hasInterim) {
+    sub = {
+      original: ((open?.original ?? "") + t.interimOriginal).trim(),
+      vi: ((open?.vi ?? "") + t.interimVi).trim(),
+      live: true,
+    };
+  } else if (last) {
+    sub = { original: last.original.trim(), vi: last.vi.trim(), live: false };
+  }
+  return sub && (sub.original || sub.vi) ? sub : null;
 }

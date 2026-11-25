@@ -1,10 +1,13 @@
-import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { createPortal } from "react-dom";
 import { SonioxClient } from "@soniox/client";
 import { ApiError, fetchSttKey, login } from "./api";
 import { Listener, type ErrorKind, type Status } from "./listener";
 import { MSG } from "./messages";
 import { PcmMicSource } from "./pcmSource";
-import { emptyTranscript, type Lang } from "./subtitles";
+import { floatingSupported, openFloatingWindow } from "./floatingWindow";
+import { SubtitleView } from "./SubtitleView";
+import { clearTranscript, currentSubtitle, emptyTranscript, type Lang } from "./subtitles";
 
 const LS = { token: "s2t.token", exp: "s2t.expiresAt", lang: "s2t.lang" };
 
@@ -105,8 +108,7 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [transcript, setTranscript] = useState(emptyTranscript);
 
-  const list = useRef<HTMLDivElement>(null);
-  const atBottom = useRef(true);
+  const [floating, setFloating] = useState<Window | null>(null);
   const expired = useRef(onExpired);
   expired.current = onExpired;
 
@@ -178,16 +180,27 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
 
   useEffect(() => () => listener.current?.cancel(), []);
 
-  useLayoutEffect(() => {
-    const el = list.current;
-    if (el && atBottom.current) el.scrollTop = el.scrollHeight;
-  }, [transcript]);
+  // The floating window closes itself when the user closes it or the page goes away.
+  useEffect(() => {
+    if (!floating) return;
+    const onClose = () => setFloating(null);
+    floating.addEventListener("pagehide", onClose);
+    return () => {
+      floating.removeEventListener("pagehide", onClose);
+      floating.close();
+    };
+  }, [floating]);
 
-  const lines = transcript.lines;
-  const open = lines.length && !lines[lines.length - 1].closed ? lines[lines.length - 1] : null;
-  const closed = open ? lines.slice(0, -1) : lines;
-  const liveOriginal = ((open?.original ?? "") + transcript.interimOriginal).trim();
-  const liveVi = ((open?.vi ?? "") + transcript.interimVi).trim();
+  async function onFloat() {
+    if (floating) return setFloating(null);
+    try {
+      setFloating(await openFloatingWindow());
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  const sub = currentSubtitle(transcript);
 
   const statusText =
     status === "listening"
@@ -204,37 +217,26 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
     <div className="main">
       <header>
         <strong>Phụ đề</strong>
-        <div className="langs">
+        <div className="tools">
           <button aria-pressed={lang === "en"} onClick={() => onLang("en")}>
             Anh → Việt
           </button>
           <button aria-pressed={lang === "ja"} onClick={() => onLang("ja")}>
             Nhật → Việt
           </button>
+          <button onClick={() => setTranscript(clearTranscript)}>Xoá</button>
+          {floatingSupported() && (
+            <button aria-pressed={!!floating} onClick={onFloat}>
+              Cửa sổ phụ đề
+            </button>
+          )}
         </div>
       </header>
 
-      <div
-        className="lines"
-        ref={list}
-        onScroll={(e) => {
-          const el = e.currentTarget;
-          atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
-        }}
-      >
-        {closed.map((line, i) => (
-          <div key={line.id} className={i === closed.length - 1 ? "line latest" : "line"}>
-            <div className="vi">{line.vi.trim() || "…"}</div>
-            <div className="orig">{line.original.trim()}</div>
-          </div>
-        ))}
-        {(liveOriginal || liveVi) && (
-          <div className="line live">
-            <div className="vi">{liveVi || "…"}</div>
-            <div className="orig">{liveOriginal}</div>
-          </div>
-        )}
+      <div className="stage">
+        <SubtitleView sub={sub} />
       </div>
+      {floating && createPortal(<SubtitleView sub={sub} floating />, floating.document.body)}
 
       <footer>
         <p className="status" role="status">

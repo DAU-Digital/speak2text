@@ -1,6 +1,15 @@
 import { describe, expect, test } from "vitest";
 import type { RealtimeToken } from "@soniox/client";
-import { applyTokens, closeOpenLine, emptyTranscript, MAX_LINES, type Lang, type Transcript } from "./subtitles";
+import {
+  applyTokens,
+  clearTranscript,
+  closeOpenLine,
+  currentSubtitle,
+  emptyTranscript,
+  MAX_LINES,
+  type Lang,
+  type Transcript,
+} from "./subtitles";
 
 const tok = (text: string, is_final: boolean, translation_status?: RealtimeToken["translation_status"]): RealtimeToken => ({
   text,
@@ -143,5 +152,53 @@ describe("closeOpenLine", () => {
   test("không có dòng mở thì giữ nguyên danh sách", () => {
     const t = closeOpenLine(run([[o("A"), end()]]));
     expect(t.lines).toHaveLength(1);
+  });
+});
+
+describe("clearTranscript", () => {
+  test("xoá hết dòng và chữ tạm nhưng giữ bộ đếm id", () => {
+    const before = run([[o("A"), end()], [o("B"), po(" c"), pv("d")]]);
+    const t = clearTranscript(before);
+    expect(t.lines).toEqual([]);
+    expect(t.interimOriginal).toBe("");
+    expect(t.interimVi).toBe("");
+    expect(t.nextId).toBe(before.nextId);
+  });
+
+  test("câu sau khi xoá có id mới, không trùng id cũ", () => {
+    const before = run([[o("A")]]);
+    const t = run([[o("B")]], "en", clearTranscript(before));
+    expect(t.lines[0].id).not.toBe(before.lines[0].id);
+  });
+
+  test("bản dịch về muộn cho câu đã xoá bị bỏ, không hiện lại", () => {
+    const t = run([[v("Chào")]], "en", clearTranscript(run([[o("Hi"), end()]])));
+    expect(t.lines).toEqual([]);
+    expect(currentSubtitle(t)).toBeNull();
+  });
+});
+
+describe("currentSubtitle", () => {
+  test("chưa có gì → null", () => {
+    expect(currentSubtitle(emptyTranscript())).toBeNull();
+  });
+
+  test("dòng đang mở cộng chữ tạm", () => {
+    const t = run([[o("Hello"), v("Xin"), po(" wor"), pv(" chào")]]);
+    expect(currentSubtitle(t)).toEqual({ original: "Hello wor", vi: "Xin chào", live: true });
+  });
+
+  test("câu đã chốt, chưa có chữ mới → hiện câu đó", () => {
+    const t = run([[o(" Hi "), v("Chào"), end()]]);
+    expect(currentSubtitle(t)).toEqual({ original: "Hi", vi: "Chào", live: false });
+  });
+
+  test("câu mới bắt đầu (chỉ có chữ tạm) → thay câu cũ", () => {
+    const t = run([[o("Hi"), v("Chào"), end()], [po("Next")]]);
+    expect(currentSubtitle(t)).toEqual({ original: "Next", vi: "", live: true });
+  });
+
+  test("sau khi xoá → null", () => {
+    expect(currentSubtitle(clearTranscript(run([[o("Hi"), end()]])))).toBeNull();
   });
 });
