@@ -121,7 +121,7 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
 
   const listener = useRef<Listener | null>(null);
   listener.current ??= new Listener({
-    createRecording: (l, ctx, noteApiError) =>
+    createRecording: (source, target, ctx, noteApiError) =>
       new SonioxClient({
         config: async () => {
           try {
@@ -137,9 +137,9 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
         audio_format: "pcm_s16le",
         sample_rate: ctx.sampleRate,
         num_channels: 1,
-        language_hints: [l],
+        language_hints: [source],
         enable_endpoint_detection: true,
-        translation: { type: "one_way", target_language: "vi" },
+        translation: { type: "one_way", target_language: target },
         auto_reconnect: true,
         max_reconnect_attempts: 3,
         reconnect_base_delay_ms: 1000,
@@ -148,7 +148,7 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
       setStatus(s);
       if (s === "connecting") setError(null);
     },
-    onTranscript: setTranscript,
+    onTranscript: (_target, update) => setTranscript(update),
     onError: (kind, err) => {
       if (err) console.error(err);
       if (kind === "expired") expired.current();
@@ -158,7 +158,7 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
 
   function onMic() {
     const ls = listener.current!;
-    if (status === "idle") ls.start(lang, newAudioContext());
+    if (status === "idle") ls.start({ source: lang, targets: ["vi"] }, newAudioContext());
     else if (status === "listening") void ls.stop();
     else if (status === "reconnecting") ls.cancel();
   }
@@ -167,7 +167,7 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
     if (l === lang) return;
     localStorage.setItem(LS.lang, l);
     setLang(l);
-    if (listener.current!.current !== "idle") void listener.current!.switchLang(l, newAudioContext());
+    if (listener.current!.current !== "idle") void listener.current!.restart({ source: l, targets: ["vi"] }, newAudioContext());
   }
 
   // Keep the screen on while listening; ignore browsers without Wake Lock.

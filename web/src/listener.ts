@@ -1,5 +1,6 @@
-// Recording lifecycle: start / graceful stop / cancel / language switch, with a generation
-// counter so events and late promises from an old recording never touch the current one.
+// Recording lifecycle for a group of sessions (one per output language): start / graceful stop /
+// cancel / restart, with a generation counter so events and late promises from an old group never
+// touch the current one.
 import { AudioPermissionError, type RecordingState, type SonioxClient } from "@soniox/client";
 import { ApiError } from "./api";
 import { applyTokens, closeOpenLine, type Lang, type Transcript } from "./subtitles";
@@ -8,10 +9,17 @@ export type Status = "idle" | "connecting" | "listening" | "reconnecting" | "sto
 export type ErrorKind = "permission" | "expired" | "network" | "service";
 export type RecordingLike = Pick<ReturnType<SonioxClient["realtime"]["record"]>, "on" | "stop" | "cancel">;
 
+export type ListenConfig = { source: Lang; targets: Lang[] };
+
 export type ListenerDeps = {
-  createRecording: (lang: Lang, ctx: AudioContext, noteApiError: (e: ApiError) => void) => RecordingLike;
+  createRecording: (
+    source: Lang,
+    target: Lang,
+    ctx: AudioContext,
+    noteApiError: (e: ApiError) => void,
+  ) => RecordingLike;
   onStatus: (s: Status) => void;
-  onTranscript: (update: (t: Transcript) => Transcript) => void;
+  onTranscript: (target: Lang, update: (t: Transcript) => Transcript) => void;
   onError: (kind: ErrorKind, err?: unknown) => void;
 };
 
@@ -49,9 +57,11 @@ function closeCtx(ctx: AudioContext) {
   Promise.resolve(ctx.close()).catch(() => {});
 }
 
+/** Runs one Soniox session per output language as a single group. */
 export class Listener {
   private gen = 0;
-  private rec: RecordingLike | null = null;
+  private recs: RecordingLike[] = [];
+  private targets: Lang[] = [];
   private status: Status = "idle";
 
   constructor(private readonly deps: ListenerDeps) {}
@@ -61,81 +71,99 @@ export class Listener {
   }
 
   /** Starts listening. `ctx` must be created inside the user's click so iOS allows audio. */
-  start(lang: Lang, ctx: AudioContext): void {
+  start(cfg: ListenConfig, ctx: AudioContext): void {
     if (this.status !== "idle") {
       closeCtx(ctx);
       return;
     }
     const id = ++this.gen;
     const isCurrent = () => this.gen === id;
+    const { source, targets } = cfg;
+    const states = new Map<Lang, Status>();
     let apiError: ApiError | null = null;
     let wasReconnecting = false;
 
-    const rec = this.deps.createRecording(lang, ctx, (e) => {
-      apiError = e;
-    });
-    this.rec = rec;
-    this.setStatus("connecting");
-
-    const fail = (err?: unknown) => {
+    const end = (err?: unknown, report = true) => {
       if (!isCurrent()) return;
       this.gen++;
-      this.rec = null;
-      rec.cancel();
-      this.deps.onTranscript(closeOpenLine);
+      const recs = this.recs;
+      this.recs = [];
+      recs.forEach((r) => r.cancel());
+      this.closeLines();
       this.setStatus("idle");
-      this.deps.onError(classify(err, apiError, wasReconnecting), err);
+      if (report) this.deps.onError(classify(err, apiError, wasReconnecting), err);
     };
 
-    rec.on("result", (r) => {
-      if (isCurrent()) this.deps.onTranscript((t) => applyTokens(t, r.tokens, lang));
-    });
-    rec.on("session_restart", () => {
-      if (isCurrent()) this.deps.onTranscript(closeOpenLine);
-    });
-    rec.on("state_change", ({ new_state }) => {
-      if (!isCurrent()) return;
-      const s = toStatus(new_state);
-      if (s === null) return fail();
+    const update = () => {
+      if (this.status === "stopping") return; // stop() owns the status until it finishes
+      const all = targets.map((t) => states.get(t));
+      const s: Status = all.includes("reconnecting")
+        ? "reconnecting"
+        : all.every((x) => x === "listening")
+          ? "listening"
+          : "connecting";
       if (s === "reconnecting") wasReconnecting = true;
       if (s === "listening") wasReconnecting = false;
-      if (s === "idle") {
-        this.rec = null;
-        this.deps.onTranscript(closeOpenLine);
-      }
       this.setStatus(s);
+    };
+
+    this.targets = targets;
+    this.setStatus("connecting");
+    this.recs = targets.map((target) => {
+      states.set(target, "connecting");
+      const rec = this.deps.createRecording(source, target, ctx, (e) => {
+        apiError = e;
+      });
+      rec.on("result", (r) => {
+        if (isCurrent()) this.deps.onTranscript(target, (t) => applyTokens(t, r.tokens, source));
+      });
+      rec.on("session_restart", () => {
+        if (isCurrent()) this.deps.onTranscript(target, closeOpenLine);
+      });
+      rec.on("state_change", ({ new_state }) => {
+        if (!isCurrent()) return;
+        const s = toStatus(new_state);
+        if (s === null) return end();
+        if (s === "idle" && this.status !== "stopping") return end(undefined, false); // ended on its own
+        states.set(target, s);
+        update();
+      });
+      rec.on("error", (err) => end(err));
+      return rec;
     });
-    rec.on("error", (err) => fail(err));
   }
 
-  /** Graceful stop: waits for Soniox to finalize, so the last words are kept. */
+  /** Graceful stop: waits for Soniox to finalize every session, so the last words are kept. */
   async stop(): Promise<void> {
-    const rec = this.rec;
-    if (!rec || this.status !== "listening") return;
+    if (!this.recs.length || this.status !== "listening") return;
     const id = this.gen;
+    const recs = this.recs;
     this.setStatus("stopping");
-    try {
-      await rec.stop();
-    } catch {
-      if (this.gen === id) rec.cancel();
-    }
+    await Promise.all(
+      recs.map((r) =>
+        r.stop().catch(() => {
+          if (this.gen === id) r.cancel();
+        }),
+      ),
+    );
     if (this.gen !== id) return;
-    this.rec = null;
-    this.deps.onTranscript(closeOpenLine);
+    this.recs = [];
+    this.closeLines();
     this.setStatus("idle");
   }
 
   /** Immediate stop, drops anything not yet final. */
   cancel(): void {
     this.gen++;
-    const rec = this.rec;
-    this.rec = null;
-    rec?.cancel();
-    this.deps.onTranscript(closeOpenLine);
+    const recs = this.recs;
+    this.recs = [];
+    recs.forEach((r) => r.cancel());
+    this.closeLines();
     this.setStatus("idle");
   }
 
-  async switchLang(lang: Lang, ctx: AudioContext): Promise<void> {
+  /** Applies a new speaker/output configuration, restarting the sessions if they are running. */
+  async restart(cfg: ListenConfig, ctx: AudioContext): Promise<void> {
     if (this.status === "idle") {
       closeCtx(ctx);
       return;
@@ -150,7 +178,11 @@ export class Listener {
     } else {
       this.cancel();
     }
-    this.start(lang, ctx);
+    this.start(cfg, ctx);
+  }
+
+  private closeLines() {
+    this.targets.forEach((t) => this.deps.onTranscript(t, closeOpenLine));
   }
 
   private setStatus(s: Status) {
