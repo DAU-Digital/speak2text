@@ -12,6 +12,8 @@ type Options = {
   maxConnsPerIp: number;
   pingMs: number;
   sweepMs: number;
+  /** Connections that have not sent host/viewer within this time are closed. */
+  handshakeMs: number;
 };
 
 type Conn = {
@@ -150,6 +152,8 @@ export function attachRooms(server: http.Server, opts: Options): { close(): void
   }
 
   wss.on("connection", (ws, req) => {
+    // First thing: without an "error" listener a malformed frame would crash the whole process.
+    ws.on("error", () => {});
     const ip = clientIp(req);
     const count = (perIp.get(ip) ?? 0) + 1;
     if (count > opts.maxConnsPerIp) {
@@ -158,9 +162,11 @@ export function attachRooms(server: http.Server, opts: Options): { close(): void
     }
     perIp.set(ip, count);
     const c: Conn = { ws, ip, alive: true, role: null, room: null, viewerId: null, langs: [] };
+    const handshakeTimer = setTimeout(() => {
+      if (!c.role) ws.close(1008, "handshake timeout");
+    }, opts.handshakeMs);
 
     ws.on("pong", () => (c.alive = true));
-    ws.on("error", () => {});
     ws.on("message", (data) => {
       let m: unknown;
       try {
@@ -176,6 +182,7 @@ export function attachRooms(server: http.Server, opts: Options): { close(): void
       else onViewer(c, c.room, m as Incoming);
     });
     ws.on("close", () => {
+      clearTimeout(handshakeTimer);
       const left = (perIp.get(ip) ?? 1) - 1;
       if (left > 0) perIp.set(ip, left);
       else perIp.delete(ip);

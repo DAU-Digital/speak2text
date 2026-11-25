@@ -21,6 +21,8 @@ export type ListenerDeps = {
   onStatus: (s: Status) => void;
   onTranscript: (target: Lang, update: (t: Transcript) => Transcript) => void;
   onError: (kind: ErrorKind, err?: unknown) => void;
+  /** A non-pinned session failed and was dropped on its own; the rest of the group keeps running. */
+  onTargetFailed?: (target: Lang, kind: ErrorKind, err?: unknown) => void;
 };
 
 function toStatus(s: RecordingState): Status | null {
@@ -72,7 +74,13 @@ export class Listener {
   private recs = new Map<Lang, RecordingLike>();
   private targets = new Set<Lang>();
   private status: Status = "idle";
-  private group: { source: Lang; pinned: Lang; open: (target: Lang) => void; update: () => void } | null = null;
+  private group: {
+    source: Lang;
+    pinned: Lang;
+    failed: Set<Lang>;
+    open: (target: Lang) => void;
+    update: () => void;
+  } | null = null;
 
   constructor(private readonly deps: ListenerDeps) {}
 
@@ -129,6 +137,19 @@ export class Listener {
       this.setStatus(s);
     };
 
+    const failed = new Set<Lang>();
+    // A session other than the pinned one failing (e.g. Soniox concurrency limit when a viewer asks
+    // for one more language) drops only that language instead of stopping the host's mic.
+    const drop = (target: Lang, rec: RecordingLike, err?: unknown) => {
+      this.recs.delete(target);
+      states.delete(target);
+      failed.add(target);
+      rec.cancel();
+      this.deps.onTranscript(target, closeOpenLine);
+      this.deps.onTargetFailed?.(target, classify(err, apiError, false), err);
+      update();
+    };
+
     const open = (target: Lang) => {
       states.set(target, "connecting");
       this.targets.add(target);
@@ -145,19 +166,23 @@ export class Listener {
       rec.on("state_change", ({ new_state }) => {
         if (!mine()) return;
         const s = toStatus(new_state);
-        if (s === null) return end();
-        if (s === "idle" && this.status !== "stopping") return end(undefined, false); // ended on its own
+        if (s === null) return target === pinned ? end() : drop(target, rec);
+        if (s === "idle" && this.status !== "stopping") {
+          return target === pinned ? end(undefined, false) : drop(target, rec); // ended on its own
+        }
         states.set(target, s);
         update();
       });
       rec.on("error", (err) => {
-        if (mine()) end(err);
+        if (!mine()) return;
+        if (target === pinned) end(err);
+        else drop(target, rec, err);
       });
       this.recs.set(target, rec);
     };
 
     this.targets = new Set();
-    this.group = { source, pinned, open, update };
+    this.group = { source, pinned, failed, open, update };
     this.setStatus("connecting");
     [pinned, ...wanted.filter((t) => t !== pinned)].forEach(open);
   }
@@ -171,7 +196,7 @@ export class Listener {
     if (!g || this.status === "idle" || this.status === "stopping") return;
     const wanted = new Set(targets.filter((t) => t !== g.source));
     wanted.add(g.pinned);
-    for (const t of wanted) if (!this.recs.has(t)) g.open(t);
+    for (const t of wanted) if (!this.recs.has(t) && !g.failed.has(t)) g.open(t);
     for (const [t, rec] of [...this.recs]) {
       if (wanted.has(t)) continue;
       this.recs.delete(t);

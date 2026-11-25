@@ -7,7 +7,15 @@ let keys: number;
 let reg: RoomRegistry;
 
 const make = (over: Partial<ConstructorParameters<typeof RoomRegistry>[0]> = {}) =>
-  new RoomRegistry({ maxRooms: 200, maxViewers: 500, graceMs: GRACE, now: () => t, newKey: () => `key${++keys}`, ...over });
+  new RoomRegistry({
+    maxRooms: 200,
+    maxWaitingRooms: 500,
+    maxViewers: 500,
+    graceMs: GRACE,
+    now: () => t,
+    newKey: () => `key${++keys}`,
+    ...over,
+  });
 
 beforeEach(() => {
   t = 1_000_000;
@@ -97,12 +105,27 @@ test("setLines cắt còn 50 dòng và 1000 ký tự", () => {
   expect(reg.lines("hop", "vi")).toEqual(stored);
 });
 
-test("quá 200 phòng → full", () => {
+test("quá 200 phòng có chủ → full", () => {
   reg = make({ maxRooms: 2 });
   reg.claimHost("aaa");
-  reg.addViewer("bbb", "v", ["vi"]);
+  reg.claimHost("bbb");
   expect(reg.claimHost("ccc")).toEqual({ ok: false, code: "full" });
-  expect(reg.addViewer("ddd", "v", ["vi"])).toEqual({ ok: false, code: "full" });
+});
+
+test("phòng chờ của người xem không chặn chủ phòng mở phòng", () => {
+  reg = make({ maxRooms: 1, maxWaitingRooms: 5 });
+  reg.addViewer("w1", "v", ["vi"]);
+  reg.addViewer("w2", "v", ["vi"]);
+  expect(reg.claimHost("real").ok).toBe(true);
+});
+
+test("quá số phòng chờ → người xem mở mã mới bị full", () => {
+  reg = make({ maxWaitingRooms: 2 });
+  reg.addViewer("w1", "v", ["vi"]);
+  reg.addViewer("w2", "v", ["vi"]);
+  expect(reg.addViewer("w3", "v", ["vi"])).toEqual({ ok: false, code: "full" });
+  reg.claimHost("hostroom");
+  expect(reg.addViewer("hostroom", "v", ["vi"])).toEqual({ ok: true });
 });
 
 test("quá 500 người xem → full", () => {

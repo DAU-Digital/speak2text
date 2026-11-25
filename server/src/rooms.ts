@@ -35,7 +35,16 @@ type Room = {
   viewers: Map<string, Lang[]>;
 };
 
-type Options = { maxRooms: number; maxViewers: number; graceMs: number; now: () => number; newKey: () => string };
+type Options = {
+  /** Rooms with a host. Waiting rooms (viewers only) never use these slots. */
+  maxRooms: number;
+  /** Rooms opened by viewers before any host claimed them. */
+  maxWaitingRooms: number;
+  maxViewers: number;
+  graceMs: number;
+  now: () => number;
+  newKey: () => string;
+};
 
 const emptyRoom = (): Room => ({
   hostKey: null,
@@ -56,12 +65,14 @@ export class RoomRegistry {
   claimHost(code: string, hostKey?: string): { ok: true; hostKey: string } | { ok: false; code: "taken" | "full" } {
     this.expire(code);
     let room = this.rooms.get(code);
+    if (room && room.hostKey !== null && room.hostKey !== hostKey) return { ok: false, code: "taken" };
+    if (!room || room.hostKey === null) {
+      if (this.count((r) => r.hostKey !== null) >= this.opts.maxRooms) return { ok: false, code: "full" };
+    }
     if (!room) {
-      if (this.rooms.size >= this.opts.maxRooms) return { ok: false, code: "full" };
       room = emptyRoom();
       this.rooms.set(code, room);
     }
-    if (room.hostKey !== null && room.hostKey !== hostKey) return { ok: false, code: "taken" };
     room.hostKey ??= this.opts.newKey();
     room.hostOnline = true;
     room.hostLeftAt = null;
@@ -101,7 +112,7 @@ export class RoomRegistry {
   addViewer(code: string, id: string, langs: Lang[]): { ok: true } | { ok: false; code: "full" } {
     let room = this.rooms.get(code);
     if (!room) {
-      if (this.rooms.size >= this.opts.maxRooms) return { ok: false, code: "full" };
+      if (this.count((r) => r.hostKey === null) >= this.opts.maxWaitingRooms) return { ok: false, code: "full" };
       room = emptyRoom();
       this.rooms.set(code, room);
     }
@@ -157,6 +168,12 @@ export class RoomRegistry {
     const changed: string[] = [];
     for (const code of [...this.rooms.keys()]) if (this.expire(code)) changed.push(code);
     return changed;
+  }
+
+  private count(pred: (r: Room) => boolean): number {
+    let n = 0;
+    for (const r of this.rooms.values()) if (pred(r)) n++;
+    return n;
   }
 
   private expire(code: string): boolean {

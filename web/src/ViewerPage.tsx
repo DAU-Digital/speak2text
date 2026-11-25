@@ -1,10 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { isLang, LANGS, langName, langShort, type Lang } from "./languages";
-import { connectViewer, type LinkStatus, type RoomInfo } from "./roomClient";
+import { connectViewer, normalizeRoomCode, type LinkStatus, type RoomInfo } from "./roomClient";
 import { SubtitleList } from "./SubtitleView";
 import type { DisplayLine } from "./subtitles";
 
 const LS_LANGS = "s2t.viewerLangs";
+
+const ERROR_TEXT: Record<string, string> = {
+  invalid: "Mã phòng không hợp lệ. Kiểm tra lại link.",
+  full: "Phòng hoặc máy chủ đang đầy, thử lại sau ít phút.",
+};
 
 function loadLangs(): Lang[] {
   try {
@@ -24,10 +29,13 @@ export function ViewerPage({ code }: { code: string }) {
   const [everOpen, setEverOpen] = useState(false);
   const [lines, setLines] = useState<Partial<Record<Lang, DisplayLine[]>>>({});
   const [hidden, setHidden] = useState<Partial<Record<Lang, number[]>>>({});
+  const valid = normalizeRoomCode(code) !== null;
+  const [fatal, setFatal] = useState<string | null>(valid ? null : ERROR_TEXT.invalid);
   const conn = useRef<ReturnType<typeof connectViewer> | null>(null);
 
   useEffect(() => {
     document.title = `Phòng ${code} — Phụ đề`;
+    if (!valid) return;
     const c = connectViewer({
       room: code,
       langs: loadLangs(),
@@ -37,10 +45,11 @@ export function ViewerPage({ code }: { code: string }) {
         setLink(s);
         if (s === "open") setEverOpen(true);
       },
+      onError: (e) => setFatal(ERROR_TEXT[e] ?? "Không vào được phòng."),
     });
     conn.current = c;
     return () => c.close();
-  }, [code]);
+  }, [code, valid]);
 
   function toggle(l: Lang) {
     const next = LANGS.map((x) => x.code).filter((c) => (c === l ? !langs.includes(c) : langs.includes(c)));
@@ -55,8 +64,9 @@ export function ViewerPage({ code }: { code: string }) {
   }
 
   const source = info?.source ?? null;
-  const status =
-    link !== "open"
+  const status = fatal
+    ? fatal
+    : link !== "open"
       ? everOpen
         ? "Đang kết nối lại…"
         : "Đang kết nối…"

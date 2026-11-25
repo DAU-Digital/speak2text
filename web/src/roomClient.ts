@@ -24,6 +24,20 @@ export function normalizeRoomCode(raw: string): string | null {
 
 export const roomLink = (origin: string, code: string): string => `${origin}/r/${code}`;
 
+/** Room code from a /r/<code> path (lowercased), or null for other paths. Never throws. */
+export function parseRoomPath(pathname: string): string | null {
+  const seg = /^\/r\/([^/]+)\/?$/.exec(pathname)?.[1];
+  if (!seg) return null;
+  try {
+    return decodeURIComponent(seg).toLowerCase();
+  } catch {
+    return seg.toLowerCase();
+  }
+}
+
+/** Close code the server uses when a newer host connection for the same room takes over. */
+const REPLACED = 4000;
+
 export function wsUrl(): string {
   return `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/ws`;
 }
@@ -32,7 +46,14 @@ type SocketFactory = (url: string) => WebSocket;
 type Common = { socket?: SocketFactory; url?: string; onStatus: (s: LinkStatus) => void };
 
 /** Opens a socket, reconnecting with backoff until stop() or a fatal error. */
-function reconnecting(o: Common, handlers: { onOpen(ws: WebSocket): void; onMessage(ws: WebSocket, m: Record<string, unknown>): void }) {
+function reconnecting(
+  o: Common,
+  handlers: {
+    onOpen(ws: WebSocket): void;
+    onMessage(ws: WebSocket, m: Record<string, unknown>): void;
+    onReplaced?(): void;
+  },
+) {
   const make = o.socket ?? ((url: string) => new WebSocket(url));
   let ws: WebSocket | null = null;
   let attempt = 0;
@@ -55,10 +76,15 @@ function reconnecting(o: Common, handlers: { onOpen(ws: WebSocket): void; onMess
       if (m && typeof m === "object") handlers.onMessage(sock, m as Record<string, unknown>);
     };
     sock.onerror = () => {};
-    sock.onclose = () => {
+    sock.onclose = (e: CloseEvent) => {
       if (ws !== sock) return;
       ws = null;
       o.onStatus("closed");
+      if (e?.code === REPLACED && handlers.onReplaced) {
+        stopped = true;
+        handlers.onReplaced();
+        return;
+      }
       if (stopped) return;
       timer = setTimeout(connect, BACKOFF_MS[Math.min(attempt++, BACKOFF_MS.length - 1)]);
     };
@@ -115,6 +141,8 @@ export function connectHost(o: Common & {
           o.onError(m.code);
         }
       },
+      // Another tab took over this room: reconnecting would just kick it back, forever.
+      onReplaced: () => o.onError("replaced"),
     },
   );
 

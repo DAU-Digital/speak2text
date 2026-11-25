@@ -4,9 +4,10 @@ import { SonioxClient } from "@soniox/client";
 import { ApiError, fetchSttKey, getConfig, login, retriableForSdk } from "./api";
 import { effectiveTargets } from "./demand";
 import { floatingSupported, useFloatingWindow } from "./floatingWindow";
-import { isLang, LANGS, langShort, type Lang } from "./languages";
+import { isLang, LANGS, langName, langShort, type Lang } from "./languages";
 import { Listener, type ErrorKind, type Status } from "./listener";
 import { MSG } from "./messages";
+import { createRoomPublisher } from "./publisher";
 import { SharedMic } from "./sharedMic";
 import { connectHost, normalizeRoomCode, roomLink, type LinkStatus } from "./roomClient";
 import { SubtitleList } from "./SubtitleView";
@@ -20,7 +21,6 @@ const LS = {
   room: "s2t.room",
   hostKeys: "s2t.hostKeys",
 };
-const LINES_EVERY_MS = 200;
 
 function loadSource(): Lang {
   const v = localStorage.getItem(LS.source);
@@ -37,36 +37,15 @@ function loadTargets(): Lang[] {
   }
 }
 
+const isConcurrencyLimit = (err: unknown) =>
+  String((err as { raw?: { error_type?: string } })?.raw?.error_type).includes("max_concurrent");
+
 function hostKeys(): Record<string, string> {
   try {
     return JSON.parse(localStorage.getItem(LS.hostKeys) ?? "{}") as Record<string, string>;
   } catch {
     return {};
   }
-}
-
-/** Sends at most one `lines` message per language every LINES_EVERY_MS, always ending with the latest. */
-function createLinesThrottle(send: (lang: Lang, lines: DisplayLine[]) => void) {
-  const pending = new Map<Lang, DisplayLine[]>();
-  const timers = new Map<Lang, ReturnType<typeof setTimeout>>();
-  const flush = (lang: Lang) => {
-    const lines = pending.get(lang);
-    if (!lines) return void timers.delete(lang);
-    pending.delete(lang);
-    send(lang, lines);
-    timers.set(lang, setTimeout(() => flush(lang), LINES_EVERY_MS));
-  };
-  return {
-    push(lang: Lang, lines: DisplayLine[]) {
-      pending.set(lang, lines);
-      if (!timers.has(lang)) flush(lang);
-    },
-    clear() {
-      timers.forEach(clearTimeout);
-      timers.clear();
-      pending.clear();
-    },
-  };
 }
 
 function loadToken(): string | null {
@@ -193,6 +172,7 @@ function Login({ initialMsg, onToken }: { initialMsg: string; onToken: (token: s
 }
 
 type RoomState = { code: string; link: LinkStatus; opened: boolean };
+const EMPTY = emptyTranscript();
 
 function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
   const [source, setSource] = useState<Lang>(loadSource);
@@ -214,7 +194,7 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
   const [tick, setTick] = useState(0);
   const lastWanted = useRef<Partial<Record<Lang, number>>>({});
   const host = useRef<ReturnType<typeof connectHost> | null>(null);
-  const throttle = useRef<ReturnType<typeof createLinesThrottle> | null>(null);
+  const publisher = useRef<ReturnType<typeof createRoomPublisher> | null>(null);
 
   const expired = useRef(onExpired);
   expired.current = onExpired;
@@ -255,9 +235,17 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
     },
     onTranscript: (target, update) =>
       setTranscripts((ts) => ({ ...ts, [target]: update(ts[target] ?? emptyTranscript()) })),
+    onTargetFailed: (target, _kind, err) => {
+      if (err) console.error(err);
+      setRoomMsg(
+        isConcurrencyLimit(err)
+          ? `Không bật được bản dịch ${langName(target)}: tài khoản Soniox đã chạm giới hạn số phiên cùng lúc.`
+          : `Không bật được bản dịch ${langName(target)}.`,
+      );
+    },
     onError: (kind, err) => {
       if (err) console.error(err);
-      if (String((err as { raw?: { error_type?: string } })?.raw?.error_type).includes("max_concurrent")) {
+      if (isConcurrencyLimit(err)) {
         setError("Tài khoản Soniox đã chạm giới hạn số phiên cùng lúc. Đóng bớt phòng hoặc nâng giới hạn trong Soniox Console.");
       } else if (kind === "expired") expired.current();
       else setError(ERROR_MSG[kind]);
@@ -294,7 +282,7 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
     localStorage.setItem(LS.room, code);
     setRoomInput(code);
     setRoom({ code, link: "connecting", opened: false });
-    throttle.current?.clear();
+    publisher.current?.clear();
     host.current = connectHost({
       room: code,
       hostKey: hostKeys()[code],
@@ -309,6 +297,10 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
       },
       onError: (c) => {
         if (c === "taken") setRoomMsg("Mã phòng này đang có người dùng. Chọn mã khác.");
+        else if (c === "replaced") {
+          setRoomMsg("Phòng này vừa được mở ở tab hoặc máy khác, tab này đã rời phòng.");
+          listener.current!.cancel();
+        }
         else if (c === "unauthorized") expired.current();
         else if (c === "full") setRoomMsg("Máy chủ đang quá tải, thử lại sau.");
         else setRoomMsg("Không mở được phòng.");
@@ -318,14 +310,14 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
       },
       onStatus: (link) => setRoom((r) => (r && r.code === code ? { ...r, link } : r)),
     });
-    throttle.current = createLinesThrottle((lang, lines) => host.current?.sendLines(lang, lines));
+    publisher.current = createRoomPublisher((lang, lines) => host.current?.sendLines(lang, lines));
   }
 
   function leaveRoom() {
     listener.current!.cancel();
     host.current?.close();
     host.current = null;
-    throttle.current?.clear();
+    publisher.current?.clear();
     setRoom(null);
     setDemand([]);
     setViewers(0);
@@ -373,12 +365,15 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
 
   // Publish to the room: each visible translation, plus the original text from the pinned session.
   useEffect(() => {
-    const th = throttle.current;
-    if (!th || !room?.opened) return;
-    for (const l of visible) th.push(l, displayLines(transcripts[l] ?? emptyTranscript()));
+    const pub = publisher.current;
+    if (!pub || !room?.opened) return;
+    for (const l of visible) {
+      const t = transcripts[l] ?? EMPTY;
+      pub.push(l, t, () => displayLines(t));
+    }
     if (pinned) {
-      const original = displayLines(transcripts[pinned] ?? emptyTranscript()).map((x) => ({ ...x, translation: "" }));
-      th.push(source, original);
+      const t = transcripts[pinned] ?? EMPTY;
+      pub.push(source, t, () => displayLines(t).map((x) => ({ ...x, translation: "" })));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transcripts, visible.join(), pinned, source, room?.opened]);
@@ -408,7 +403,7 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
     () => () => {
       listener.current?.cancel();
       host.current?.close();
-      throttle.current?.clear();
+      publisher.current?.clear();
     },
     [],
   );

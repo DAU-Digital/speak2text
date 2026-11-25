@@ -1,4 +1,5 @@
 import http from "node:http";
+import net from "node:net";
 import type { AddressInfo } from "node:net";
 import { afterEach, expect, test } from "vitest";
 import WebSocket from "ws";
@@ -13,10 +14,13 @@ afterEach(() => {
 });
 
 let keyN = 0;
-async function startServer(opts: { hostAuth?: (t: string | undefined) => boolean; maxConnsPerIp?: number } = {}) {
+async function startServer(
+  opts: { hostAuth?: (t: string | undefined) => boolean; maxConnsPerIp?: number; handshakeMs?: number } = {},
+) {
   const server = http.createServer();
   const registry = new RoomRegistry({
     maxRooms: 200,
+    maxWaitingRooms: 500,
     maxViewers: 500,
     graceMs: 30 * 60_000,
     now: Date.now,
@@ -28,6 +32,7 @@ async function startServer(opts: { hostAuth?: (t: string | undefined) => boolean
     maxConnsPerIp: opts.maxConnsPerIp ?? 20,
     pingMs: 30_000,
     sweepMs: 60_000,
+    handshakeMs: opts.handshakeMs ?? 10_000,
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   const url = `ws://127.0.0.1:${(server.address() as AddressInfo).port}/ws`;
@@ -232,6 +237,46 @@ test("quá 20 kết nối một IP → kết nối thứ 21 bị đóng", async 
   await b.send({ t: "viewer", room: "hop", langs: ["vi"] });
   await a.next("room");
   await b.next("room");
+  const c = client(url);
+  await c.closed;
+});
+
+test("client vượt giới hạn gửi frame hỏng → server không sập", async () => {
+  const { url } = await startServer({ maxConnsPerIp: 1 });
+  const a = client(url);
+  await a.send({ t: "viewer", room: "hop", langs: ["vi"] });
+  await a.next("room");
+  const { port } = new URL(url);
+  // Upgrade request and an invalid frame (RSV bits set) in one write, so the server parses the bad
+  // frame right after rejecting the over-limit connection.
+  const raw = net.connect(Number(port), "127.0.0.1");
+  cleanups.push(() => raw.destroy());
+  const errors: unknown[] = [];
+  const onUncaught = (e: unknown) => errors.push(e);
+  process.on("uncaughtException", onUncaught);
+  cleanups.push(() => process.off("uncaughtException", onUncaught));
+  await new Promise<void>((r) => raw.once("connect", () => r()));
+  raw.write(
+    Buffer.concat([
+      Buffer.from(
+        "GET /ws HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
+          "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n",
+      ),
+      Buffer.from([0xf1, 0x80, 1, 2, 3, 4]),
+    ]),
+  );
+  await new Promise((r) => setTimeout(r, 200));
+  expect(errors).toEqual([]);
+  a.ws.close();
+  await a.closed;
+  await new Promise((r) => setTimeout(r, 50));
+  const c = client(url);
+  await c.send({ t: "viewer", room: "hop", langs: ["vi"] });
+  expect((await c.next("room")).t).toBe("room");
+});
+
+test("kết nối không handshake trong thời hạn bị đóng", async () => {
+  const { url } = await startServer({ handshakeMs: 50 });
   const c = client(url);
   await c.closed;
 });

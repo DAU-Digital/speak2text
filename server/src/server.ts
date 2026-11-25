@@ -48,13 +48,18 @@ const secret = config.sessionSecret;
 attachRooms(httpServer, {
   registry: new RoomRegistry({
     maxRooms: 200,
+    maxWaitingRooms: 500,
     maxViewers: 500,
     graceMs: 30 * 60_000,
     now: Date.now,
     newKey: () => randomBytes(16).toString("hex"),
   }),
   hostAuth: config.passcode ? (t) => !!t && verifyToken(secret, t, Date.now()) : undefined,
-  maxConnsPerIp: 20,
+  // Venue Wi-Fi puts many viewers behind one public IP.
+  maxConnsPerIp: 300,
   pingMs: 30_000,
   sweepMs: 60_000,
+  handshakeMs: 10_000,
 });
+
+process.on("uncaughtException", (err) => console.error("uncaught:", err));

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { connectHost, connectViewer, normalizeRoomCode, roomLink } from "./roomClient";
+import { connectHost, connectViewer, normalizeRoomCode, parseRoomPath, roomLink } from "./roomClient";
 
 class FakeSocket {
   static all: FakeSocket[] = [];
@@ -7,7 +7,7 @@ class FakeSocket {
   sent: unknown[] = [];
   onopen: (() => void) | null = null;
   onmessage: ((e: { data: string }) => void) | null = null;
-  onclose: (() => void) | null = null;
+  onclose: ((e: { code: number }) => void) | null = null;
   onerror: (() => void) | null = null;
   constructor(public url: string) {
     FakeSocket.all.push(this);
@@ -17,7 +17,7 @@ class FakeSocket {
   }
   close() {
     this.readyState = 3;
-    this.onclose?.();
+    this.onclose?.({ code: 1000 });
   }
   open() {
     this.readyState = 1;
@@ -26,9 +26,9 @@ class FakeSocket {
   receive(m: object) {
     this.onmessage?.({ data: JSON.stringify(m) });
   }
-  drop() {
+  drop(code = 1006) {
     this.readyState = 3;
-    this.onclose?.();
+    this.onclose?.({ code });
   }
 }
 
@@ -150,4 +150,23 @@ test("normalizeRoomCode giống server", () => {
 
 test("roomLink tạo link /r/<mã>", () => {
   expect(roomLink("https://s2t.example.com", "hop")).toBe("https://s2t.example.com/r/hop");
+});
+
+test("bị tab khác thay (close 4000) → không nối lại, báo replaced", () => {
+  const o = hostOpts();
+  connectHost(o);
+  last().open();
+  last().receive({ t: "hello", hostKey: "k1" });
+  last().drop(4000);
+  vi.advanceTimersByTime(60_000);
+  expect(FakeSocket.all).toHaveLength(1);
+  expect(o.onError).toHaveBeenCalledWith("replaced");
+});
+
+test("parseRoomPath không ném lỗi với link hỏng", () => {
+  expect(parseRoomPath("/r/Hop-Thu")).toBe("hop-thu");
+  expect(parseRoomPath("/r/hop/")).toBe("hop");
+  expect(parseRoomPath("/r/%E0%A4%A")).toBe("%e0%a4%a");
+  expect(parseRoomPath("/")).toBeNull();
+  expect(parseRoomPath("/app")).toBeNull();
 });

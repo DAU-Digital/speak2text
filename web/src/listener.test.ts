@@ -51,6 +51,7 @@ let errors: ErrorKind[];
 let transcripts: Partial<Record<Lang, Transcript>>;
 let closedCtx: number;
 let listener: Listener;
+let failedTargets: [Lang, ErrorKind][];
 
 const ctx = () => ({ close: () => void closedCtx++, state: "running" }) as unknown as AudioContext;
 const status = () => statuses[statuses.length - 1];
@@ -63,7 +64,9 @@ beforeEach(() => {
   errors = [];
   transcripts = {};
   closedCtx = 0;
+  failedTargets = [];
   listener = new Listener({
+    onTargetFailed: (t, k) => failedTargets.push([t, k]),
     createRecording: (source, target, _ctx, noteApiError) => {
       const r = new FakeRecording(source, target, noteApiError);
       recs.push(r);
@@ -315,10 +318,30 @@ test("setTargets khi idle không làm gì", () => {
   expect(recs).toHaveLength(0);
 });
 
-test("một phiên thêm sau bị lỗi → huỷ cả nhóm", () => {
+test("phiên không phải phiên gốc bị lỗi → chỉ bỏ ngôn ngữ đó, phiên gốc vẫn chạy", () => {
   const [a] = listen(cfg(["vi"], "en"));
   listener.setTargets(["vi", "ja"]);
+  recs[1].emit("error", new Error("max_concurrent"));
+  expect(a.canceled).toBe(false);
+  expect(status()).toBe("listening");
+  expect(listener.running).toEqual(["vi"]);
+  expect(failedTargets).toEqual([["ja", "service"]]);
+  expect(errors).toEqual([]);
+});
+
+test("ngôn ngữ đã lỗi không bị mở lại liên tục khi setTargets", () => {
+  listen(cfg(["vi"], "en"));
+  listener.setTargets(["vi", "ja"]);
   recs[1].emit("error", new Error("boom"));
-  expect(a.canceled).toBe(true);
+  listener.setTargets(["vi", "ja"]);
+  expect(recs).toHaveLength(2);
+});
+
+test("phiên gốc bị lỗi → huỷ cả nhóm", () => {
+  const [a] = listen(cfg(["vi"], "en"));
+  listener.setTargets(["vi", "ja"]);
+  a.emit("error", new Error("boom"));
+  expect(recs[1].canceled).toBe(true);
   expect(status()).toBe("idle");
+  expect(errors).toEqual(["service"]);
 });
