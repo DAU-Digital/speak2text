@@ -96,12 +96,11 @@ test("mở một recording cho mỗi ngôn ngữ đầu ra", () => {
   expect(status()).toBe("listening");
 });
 
-test("listening chỉ khi mọi phiên đã recording", () => {
+test("listening khi phiên gốc đã recording, kể cả khi phiên khác còn connecting", () => {
   listener.start(cfg(["en", "vi"], "ja"), ctx());
-  recs[0].state("recording");
-  recs[1].state("connecting");
-  expect(status()).toBe("connecting");
   recs[1].state("recording");
+  expect(status()).toBe("connecting");
+  recs[0].state("recording");
   expect(status()).toBe("listening");
 });
 
@@ -261,4 +260,65 @@ test("stop treo quá 5 giây → huỷ cả nhóm, về idle", async () => {
   } finally {
     vi.useRealTimers();
   }
+});
+
+test("start với targets rỗng → phiên gốc vi (hoặc en khi nói tiếng Việt)", () => {
+  listener.start(cfg([], "ja"), ctx());
+  expect(recs.map((r) => r.target)).toEqual(["vi"]);
+  listener.cancel();
+  listener.start(cfg([], "vi"), ctx());
+  expect(recs.at(-1)!.target).toBe("en");
+});
+
+test("setTargets thêm ngôn ngữ mở đúng một phiên, phiên cũ không bị dừng", () => {
+  const [a] = listen(cfg(["vi"], "en"));
+  listener.setTargets(["vi", "ja"]);
+  expect(recs.map((r) => r.target)).toEqual(["vi", "ja"]);
+  expect(a.stopCalled || a.canceled).toBe(false);
+  expect(listener.running).toEqual(["vi", "ja"]);
+});
+
+test("status vẫn listening khi phiên mới đang connecting", () => {
+  listen(cfg(["vi"], "en"));
+  listener.setTargets(["vi", "ja"]);
+  recs[1].state("connecting");
+  expect(status()).toBe("listening");
+});
+
+test("setTargets bớt ngôn ngữ dừng êm đúng phiên đó", () => {
+  const [a, b] = listen(cfg(["vi", "ja"], "en"));
+  listener.setTargets(["vi"]);
+  expect(b.stopCalled).toBe(true);
+  expect(a.stopCalled || a.canceled).toBe(false);
+  expect(listener.running).toEqual(["vi"]);
+  b.resolveStop(); // its "stopped" must not end the group
+  expect(status()).toBe("listening");
+});
+
+test("không bao giờ bỏ phiên gốc", () => {
+  const [a] = listen(cfg(["vi", "ja"], "en"));
+  listener.setTargets(["ja"]);
+  expect(a.stopCalled).toBe(false);
+  expect(listener.pinned).toBe("vi");
+  expect(listener.running).toEqual(["vi", "ja"]);
+});
+
+test("kết quả phiên mới vào transcript ngôn ngữ đó", () => {
+  listen(cfg(["vi"], "en"));
+  listener.setTargets(["vi", "ko"]);
+  recs[1].emit("result", { tokens: [o("Hi")] });
+  expect(lines("ko").map((l) => l.original)).toEqual(["Hi"]);
+});
+
+test("setTargets khi idle không làm gì", () => {
+  listener.setTargets(["vi"]);
+  expect(recs).toHaveLength(0);
+});
+
+test("một phiên thêm sau bị lỗi → huỷ cả nhóm", () => {
+  const [a] = listen(cfg(["vi"], "en"));
+  listener.setTargets(["vi", "ja"]);
+  recs[1].emit("error", new Error("boom"));
+  expect(a.canceled).toBe(true);
+  expect(status()).toBe("idle");
 });
