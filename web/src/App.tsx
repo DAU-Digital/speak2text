@@ -1,12 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
-import { AudioPermissionError, SonioxClient, type RecordingState } from "@soniox/client";
+import { SonioxClient } from "@soniox/client";
 import { ApiError, fetchSttKey, login } from "./api";
+import { Listener, type ErrorKind, type Status } from "./listener";
 import { MSG } from "./messages";
 import { PcmMicSource } from "./pcmSource";
-import { applyTokens, closeOpenLine, emptyTranscript, type Lang } from "./subtitles";
-
-type Status = "idle" | "connecting" | "listening" | "reconnecting";
-type Recording = ReturnType<SonioxClient["realtime"]["record"]>;
+import { emptyTranscript, type Lang } from "./subtitles";
 
 const LS = { token: "s2t.token", exp: "s2t.expiresAt", lang: "s2t.lang" };
 
@@ -16,11 +14,17 @@ function loadToken(): string | null {
   return token && exp > Date.now() ? token : null;
 }
 
-function toStatus(s: RecordingState): Status {
-  if (s === "starting" || s === "connecting") return "connecting";
-  if (s === "recording") return "listening";
-  if (s === "reconnecting") return "reconnecting";
-  return "idle";
+const ERROR_MSG: Record<Exclude<ErrorKind, "expired">, string> = {
+  permission: MSG.MSG02,
+  network: MSG.MSG05,
+  service: MSG.MSG10,
+};
+
+/** Must be called inside the click handler so iOS lets the context run. */
+function newAudioContext(): AudioContext {
+  const ctx = new AudioContext();
+  void ctx.resume().catch(() => {});
+  return ctx;
 }
 
 export default function App() {
@@ -101,125 +105,60 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [transcript, setTranscript] = useState(emptyTranscript);
 
-  const recording = useRef<Recording | null>(null);
-  const gen = useRef(0);
   const list = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
+  const expired = useRef(onExpired);
+  expired.current = onExpired;
 
-  function start(l: Lang) {
-    const id = ++gen.current;
-    const isCurrent = () => gen.current === id;
-    const ctx = new AudioContext();
-    void ctx.resume(); // inside the click gesture, so iOS allows audio
-    let apiError: ApiError | null = null;
-    let wasReconnecting = false;
-
-    const fail = (err?: unknown) => {
-      if (!isCurrent()) return;
-      gen.current++;
-      recording.current?.cancel();
-      recording.current = null;
-      setTranscript(closeOpenLine);
-      setStatus("idle");
-      if (apiError?.status === 401 || (err instanceof ApiError && err.status === 401)) {
-        onExpired();
-        return;
-      }
-      const name = err instanceof Error ? err.name : "";
-      if (err instanceof AudioPermissionError || name === "AudioPermissionError" || name === "NotAllowedError") {
-        setError(MSG.MSG02);
-      } else if (wasReconnecting || apiError?.status === 0) {
-        setError(MSG.MSG05);
-      } else {
-        setError(MSG.MSG10);
-      }
-      if (err) console.error(err);
-    };
-
-    const client = new SonioxClient({
-      config: async () => {
-        try {
-          return { api_key: await fetchSttKey(token) };
-        } catch (err) {
-          if (err instanceof ApiError) apiError = err;
-          throw err;
-        }
-      },
-    });
-
-    const rec = client.realtime.record({
-      model: "stt-rt-v6",
-      source: new PcmMicSource(ctx),
-      audio_format: "pcm_s16le",
-      sample_rate: ctx.sampleRate,
-      num_channels: 1,
-      language_hints: [l],
-      enable_endpoint_detection: true,
-      translation: { type: "one_way", target_language: "vi" },
-      auto_reconnect: true,
-      max_reconnect_attempts: 3,
-      reconnect_base_delay_ms: 1000,
-    });
-    recording.current = rec;
-    setError(null);
-    setStatus("connecting");
-
-    rec.on("result", (r) => {
-      if (isCurrent()) setTranscript((t) => applyTokens(t, r.tokens, l));
-    });
-    rec.on("session_restart", () => {
-      if (isCurrent()) setTranscript(closeOpenLine);
-    });
-    rec.on("state_change", ({ new_state }) => {
-      if (!isCurrent()) return;
-      if (new_state === "error") {
-        // Let the `error` event (which carries the cause) win if it comes right after.
-        setTimeout(() => fail(), 0);
-        return;
-      }
-      const s = toStatus(new_state);
-      if (s === "reconnecting") wasReconnecting = true;
-      if (s === "listening") wasReconnecting = false;
+  const listener = useRef<Listener | null>(null);
+  listener.current ??= new Listener({
+    createRecording: (l, ctx, noteApiError) =>
+      new SonioxClient({
+        config: async () => {
+          try {
+            return { api_key: await fetchSttKey(token) };
+          } catch (err) {
+            if (err instanceof ApiError) noteApiError(err);
+            throw err;
+          }
+        },
+      }).realtime.record({
+        model: "stt-rt-v6",
+        source: new PcmMicSource(ctx),
+        audio_format: "pcm_s16le",
+        sample_rate: ctx.sampleRate,
+        num_channels: 1,
+        language_hints: [l],
+        enable_endpoint_detection: true,
+        translation: { type: "one_way", target_language: "vi" },
+        auto_reconnect: true,
+        max_reconnect_attempts: 3,
+        reconnect_base_delay_ms: 1000,
+      }),
+    onStatus: (s) => {
       setStatus(s);
-      if (s === "idle") recording.current = null;
-    });
-    rec.on("error", (err) => fail(err));
-  }
-
-  async function stop() {
-    const rec = recording.current;
-    if (!rec) return;
-    try {
-      await rec.stop();
-    } catch {
-      rec.cancel();
-    }
-    setTranscript(closeOpenLine);
-    setStatus("idle");
-  }
-
-  function cancel() {
-    gen.current++;
-    recording.current?.cancel();
-    recording.current = null;
-    setTranscript(closeOpenLine);
-    setStatus("idle");
-  }
+      if (s === "connecting") setError(null);
+    },
+    onTranscript: setTranscript,
+    onError: (kind, err) => {
+      if (err) console.error(err);
+      if (kind === "expired") expired.current();
+      else setError(ERROR_MSG[kind]);
+    },
+  });
 
   function onMic() {
-    if (status === "idle") start(lang);
-    else if (status === "listening") void stop();
-    else if (status === "reconnecting") cancel();
+    const ls = listener.current!;
+    if (status === "idle") ls.start(lang, newAudioContext());
+    else if (status === "listening") void ls.stop();
+    else if (status === "reconnecting") ls.cancel();
   }
 
   function onLang(l: Lang) {
     if (l === lang) return;
     localStorage.setItem(LS.lang, l);
     setLang(l);
-    if (status !== "idle") {
-      cancel();
-      start(l);
-    }
+    if (listener.current!.current !== "idle") void listener.current!.switchLang(l, newAudioContext());
   }
 
   // Keep the screen on while listening; ignore browsers without Wake Lock.
@@ -237,7 +176,7 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
     };
   }, [status]);
 
-  useEffect(() => () => recording.current?.cancel(), []);
+  useEffect(() => () => listener.current?.cancel(), []);
 
   useLayoutEffect(() => {
     const el = list.current;
@@ -257,7 +196,9 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
         ? MSG.MSG04
         : status === "connecting"
           ? "Đang kết nối…"
-          : (error ?? MSG.MSG11(lang));
+          : status === "stopping"
+            ? "Đang dừng…"
+            : (error ?? MSG.MSG11(lang));
 
   return (
     <div className="main">
@@ -302,10 +243,10 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
         <button
           className={`mic ${status}`}
           onClick={onMic}
-          disabled={status === "connecting"}
+          disabled={status === "connecting" || status === "stopping"}
           aria-label={status === "idle" ? "Bắt đầu nghe" : "Dừng nghe"}
         >
-          {status === "connecting" ? "…" : status === "idle" ? "🎤" : "■"}
+          {status === "connecting" || status === "stopping" ? "…" : status === "idle" ? "🎤" : "■"}
         </button>
       </footer>
     </div>

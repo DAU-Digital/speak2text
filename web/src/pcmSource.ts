@@ -7,6 +7,7 @@ export class PcmMicSource implements AudioSource {
   private stream: MediaStream | null = null;
   private node: AudioWorkletNode | null = null;
   private input: MediaStreamAudioSourceNode | null = null;
+  private mute: GainNode | null = null;
   private stopped = false;
 
   constructor(private readonly ctx: AudioContext) {}
@@ -26,11 +27,18 @@ export class PcmMicSource implements AudioSource {
       this.release();
       return;
     }
+    // iOS can leave a context created before the permission prompt suspended.
+    await this.ctx.resume().catch(() => {});
     await this.ctx.audioWorklet.addModule("/pcm-worklet.js");
     this.input = this.ctx.createMediaStreamSource(this.stream);
     this.node = new AudioWorkletNode(this.ctx, "pcm-capture");
     this.node.port.onmessage = (e: MessageEvent<ArrayBuffer>) => handlers.onData(e.data);
+    // WebKit only runs nodes reachable from the destination: route through a silent gain.
+    this.mute = this.ctx.createGain();
+    this.mute.gain.value = 0;
     this.input.connect(this.node);
+    this.node.connect(this.mute);
+    this.mute.connect(this.ctx.destination);
     const track = this.stream.getAudioTracks()[0];
     if (track) {
       track.onended = () => handlers.onError(new Error("Microphone track ended"));
@@ -48,12 +56,14 @@ export class PcmMicSource implements AudioSource {
     if (this.node) this.node.port.onmessage = null;
     this.input?.disconnect();
     this.node?.disconnect();
+    this.mute?.disconnect();
     this.stream?.getTracks().forEach((t) => {
       t.onended = null;
       t.stop();
     });
     this.input = null;
     this.node = null;
+    this.mute = null;
     this.stream = null;
     if (this.ctx.state !== "closed") void this.ctx.close().catch(() => {});
   }
