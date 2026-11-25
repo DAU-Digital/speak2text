@@ -4,7 +4,8 @@ import {
   applyTokens,
   clearTranscript,
   closeOpenLine,
-  currentSubtitle,
+  displayLines,
+  DISPLAY_MAX,
   emptyTranscript,
   MAX_LINES,
   type Lang,
@@ -180,31 +181,49 @@ describe("clearTranscript", () => {
   test("bản dịch về muộn cho câu đã xoá bị bỏ, không hiện lại", () => {
     const t = run([[v("Chào")]], "en", clearTranscript(run([[o("Hi"), end()]])));
     expect(t.lines).toEqual([]);
-    expect(currentSubtitle(t)).toBeNull();
+    expect(displayLines(t)).toEqual([]);
   });
 });
 
-describe("currentSubtitle", () => {
-  test("chưa có gì → null", () => {
-    expect(currentSubtitle(emptyTranscript())).toBeNull();
+describe("displayLines", () => {
+  test("chưa có gì → rỗng", () => {
+    expect(displayLines(emptyTranscript())).toEqual([]);
   });
 
-  test("dòng đang mở cộng chữ tạm", () => {
-    const t = run([[o("Hello"), v("Xin"), po(" wor"), pv(" chào")]]);
-    expect(currentSubtitle(t)).toEqual({ original: "Hello wor", translation: "Xin chào", live: true });
+  test("các câu đã chốt rồi tới câu đang nói (cộng chữ tạm) ở cuối", () => {
+    const t = run([[o("Hi"), v("Chào"), end()], [o(" How"), v("Bạn"), po(" are"), pv(" khoẻ")]]);
+    expect(displayLines(t).map(({ original, translation, live }) => ({ original, translation, live }))).toEqual([
+      { original: "Hi", translation: "Chào", live: false },
+      { original: "How are", translation: "Bạn khoẻ", live: true },
+    ]);
   });
 
-  test("câu đã chốt, chưa có chữ mới → hiện câu đó", () => {
-    const t = run([[o(" Hi "), v("Chào"), end()]]);
-    expect(currentSubtitle(t)).toEqual({ original: "Hi", translation: "Chào", live: false });
-  });
-
-  test("câu mới bắt đầu (chỉ có chữ tạm) → thay câu cũ", () => {
+  test("câu mới mới chỉ có chữ tạm → thêm một dòng live ở cuối", () => {
     const t = run([[o("Hi"), v("Chào"), end()], [po("Next")]]);
-    expect(currentSubtitle(t)).toEqual({ original: "Next", translation: "", live: true });
+    const lines = displayLines(t);
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toMatchObject({ original: "Next", translation: "", live: true });
   });
 
-  test("sau khi xoá → null", () => {
-    expect(currentSubtitle(clearTranscript(run([[o("Hi"), end()]])))).toBeNull();
+  test("id các dòng không trùng, kể cả dòng live", () => {
+    const t = run([[o("A"), end()], [o("B"), end()], [po("c")]]);
+    const ids = displayLines(t).map((l) => l.id);
+    expect(new Set(ids).size).toBe(3);
+  });
+
+  test("bỏ dòng rỗng", () => {
+    const t = run([[o("  "), end()], [o("A"), end()]]);
+    expect(displayLines(t).map((l) => l.original)).toEqual(["A"]);
+  });
+
+  test("chỉ giữ DISPLAY_MAX dòng gần nhất", () => {
+    const batches = Array.from({ length: DISPLAY_MAX + 5 }, (_, i) => [o(`s${i}`), end()]);
+    const lines = displayLines(run(batches));
+    expect(lines).toHaveLength(DISPLAY_MAX);
+    expect(lines[0].original).toBe("s5");
+  });
+
+  test("sau khi xoá → rỗng", () => {
+    expect(displayLines(clearTranscript(run([[o("Hi"), end()]])))).toEqual([]);
   });
 });

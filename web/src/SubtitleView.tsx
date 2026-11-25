@@ -1,41 +1,46 @@
 import { useLayoutEffect, useRef } from "react";
-import type { Subtitle } from "./subtitles";
+import type { DisplayLine } from "./subtitles";
 
-function showTail(el: HTMLElement) {
-  el.scrollLeft = el.scrollWidth;
-  el.classList.toggle("clipped", el.scrollWidth > el.clientWidth);
-}
-
-/** One text row; when too long, the start is clipped so the newest words stay visible. */
-export function OneRow({ text, className }: { text: string; className: string }) {
+/**
+ * Recent subtitle lines, translation above original, newest at the bottom. Scrolls to the newest
+ * line automatically unless the reader has scrolled up to look back.
+ */
+export function SubtitleList({ lines, floating = false }: { lines: DisplayLine[]; floating?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
+  const stick = useRef(true);
 
   useLayoutEffect(() => {
-    if (ref.current) showTail(ref.current);
-  });
+    const el = ref.current;
+    if (el && stick.current) el.scrollTop = el.scrollHeight;
+  }, [lines]);
 
   useLayoutEffect(() => {
     const el = ref.current;
     const win = el?.ownerDocument.defaultView;
     if (!el || !win) return;
-    const onResize = () => showTail(el);
+    const onResize = () => {
+      if (stick.current) el.scrollTop = el.scrollHeight;
+    };
     win.addEventListener("resize", onResize);
     return () => win.removeEventListener("resize", onResize);
   }, []);
 
   return (
-    <div ref={ref} className={`row ${className}`}>
-      {text || " "}
-    </div>
-  );
-}
-
-/** Translation on top, original speech below — a single subtitle, never a list. */
-export function SubtitleView({ sub, floating = false }: { sub: Subtitle | null; floating?: boolean }) {
-  return (
-    <div className={floating ? "sub floating" : "sub"} aria-live="polite">
-      <OneRow className="tr" text={sub?.translation ?? ""} />
-      <OneRow className="orig" text={sub?.original ?? ""} />
+    <div
+      ref={ref}
+      className={floating ? "list floating" : "list"}
+      aria-live="polite"
+      onScroll={(e) => {
+        const el = e.currentTarget;
+        stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+      }}
+    >
+      {lines.map((l, i) => (
+        <div key={l.id} className={i === lines.length - 1 ? "line latest" : "line"}>
+          <div className="tr">{l.translation || "…"}</div>
+          {l.original && <div className="orig">{l.original}</div>}
+        </div>
+      ))}
     </div>
   );
 }

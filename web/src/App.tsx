@@ -8,8 +8,8 @@ import { isLang, LANGS, langShort, sanitizeTargets, type Lang } from "./language
 import { Listener, type ErrorKind, type Status } from "./listener";
 import { MSG } from "./messages";
 import { SharedMic } from "./sharedMic";
-import { OneRow, SubtitleView } from "./SubtitleView";
-import { clearTranscript, currentSubtitle, emptyTranscript, type Subtitle, type Transcript } from "./subtitles";
+import { SubtitleList } from "./SubtitleView";
+import { clearTranscript, displayLines, emptyTranscript, type DisplayLine, type Transcript } from "./subtitles";
 
 const LS = { token: "s2t.token", exp: "s2t.expiresAt", source: "s2t.source", targets: "s2t.targets" };
 
@@ -228,11 +228,11 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
     window.open(`/sub?lang=${l}`, `s2t-sub-${l}`, "popup,width=960,height=180");
   }
 
-  const subs = useMemo<Partial<Record<Lang, Subtitle | null>>>(
-    () => Object.fromEntries(targets.map((t) => [t, currentSubtitle(transcripts[t] ?? emptyTranscript())])),
+  const subs = useMemo<Partial<Record<Lang, DisplayLine[]>>>(
+    () => Object.fromEntries(targets.map((t) => [t, displayLines(transcripts[t] ?? emptyTranscript())])),
     [targets, transcripts],
   );
-  const first = subs[targets[0]] ?? null;
+  const first = subs[targets[0]] ?? [];
   const published = useMemo(() => ({ source, subs }), [source, subs]);
   useSubtitlePublisher(published);
 
@@ -302,17 +302,14 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
       </header>
 
       <div className="stage">
-        <div className="sub" aria-live="polite">
-          {targets.map((t) => (
-            <div className="labeled" key={t}>
-              <span className="tag">{langShort(t)}</span>
-              <OneRow className="tr" text={subs[t]?.translation ?? ""} />
-            </div>
-          ))}
-          <OneRow className="orig" text={first?.original ?? ""} />
-        </div>
+        {targets.map((t) => (
+          <section className="target" key={t}>
+            {targets.length > 1 && <span className="tag">{langShort(t)}</span>}
+            <SubtitleList lines={subs[t] ?? []} />
+          </section>
+        ))}
       </div>
-      {floating && createPortal(<SubtitleView sub={first} floating />, floating.document.body)}
+      {floating && createPortal(<SubtitleList lines={first} floating />, floating.document.body)}
 
       <footer>
         <p className="status" role="status">

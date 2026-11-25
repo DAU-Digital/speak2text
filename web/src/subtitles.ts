@@ -92,22 +92,27 @@ export function clearTranscript(t: Transcript): Transcript {
   return { ...emptyTranscript(), nextId: t.nextId };
 }
 
-export type Subtitle = { original: string; translation: string; live: boolean };
+/** How many recent lines the subtitle views keep (and the recording tab broadcasts). */
+export const DISPLAY_MAX = 50;
 
-/** The single subtitle to show: the sentence being spoken, else the last finished one. */
-export function currentSubtitle(t: Transcript): Subtitle | null {
+export type DisplayLine = { id: number; original: string; translation: string; live: boolean };
+
+/** Recent lines to show, oldest first; the sentence being spoken (with interim text) is last. */
+export function displayLines(t: Transcript): DisplayLine[] {
+  const out: DisplayLine[] = [];
   const last = t.lines[t.lines.length - 1];
   const open = last && !last.closed ? last : null;
+  for (const l of open ? t.lines.slice(0, -1) : t.lines) {
+    out.push({ id: l.id, original: l.original.trim(), translation: l.translation.trim(), live: false });
+  }
   const hasInterim = (t.interimOriginal + t.interimTranslation).trim().length > 0;
-  let sub: Subtitle | null = null;
   if (open || hasInterim) {
-    sub = {
+    out.push({
+      id: open?.id ?? t.nextId,
       original: ((open?.original ?? "") + t.interimOriginal).trim(),
       translation: ((open?.translation ?? "") + t.interimTranslation).trim(),
       live: true,
-    };
-  } else if (last) {
-    sub = { original: last.original.trim(), translation: last.translation.trim(), live: false };
+    });
   }
-  return sub && (sub.original || sub.translation) ? sub : null;
+  return out.filter((l) => l.original || l.translation).slice(-DISPLAY_MAX);
 }

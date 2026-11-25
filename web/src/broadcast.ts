@@ -1,12 +1,12 @@
-// The recording tab publishes the current subtitle of every output language; /sub pages on the
+// The recording tab publishes the recent subtitle lines of every output language; /sub pages on the
 // same browser listen. A page that opens later says "hello" and gets the latest state at once.
 import { useEffect, useRef } from "react";
 import { isLang, type Lang } from "./languages";
-import type { Subtitle } from "./subtitles";
+import type { DisplayLine } from "./subtitles";
 
 export const CHANNEL = "s2t-subtitles";
 
-export type SubtitleState = { source: Lang; subs: Partial<Record<Lang, Subtitle | null>> };
+export type SubtitleState = { source: Lang; subs: Partial<Record<Lang, DisplayLine[]>> };
 type Message = { type: "hello" } | { type: "state"; state: SubtitleState };
 
 export function createPublisher(): { publish(state: SubtitleState): void; close(): void } {
@@ -26,11 +26,11 @@ export function createPublisher(): { publish(state: SubtitleState): void; close(
   };
 }
 
-export function subscribe(lang: Lang, onSub: (sub: Subtitle | null) => void): () => void {
+export function subscribe(lang: Lang, onLines: (lines: DisplayLine[]) => void): () => void {
   const ch = new BroadcastChannel(CHANNEL);
   ch.onmessage = (e: MessageEvent<Message>) => {
     const msg = e.data;
-    if (msg?.type === "state" && isLang(msg.state?.source)) onSub(msg.state.subs[lang] ?? null);
+    if (msg?.type === "state" && isLang(msg.state?.source)) onLines(msg.state.subs[lang] ?? []);
   };
   ch.postMessage({ type: "hello" } satisfies Message);
   return () => ch.close();
