@@ -4,7 +4,7 @@ import { SonioxClient } from "@soniox/client";
 import { ApiError, fetchSttKey, login } from "./api";
 import { Listener, type ErrorKind, type Status } from "./listener";
 import { MSG } from "./messages";
-import { PcmMicSource } from "./pcmSource";
+import { SharedMic } from "./sharedMic";
 import { floatingSupported, openFloatingWindow } from "./floatingWindow";
 import { SubtitleView } from "./SubtitleView";
 import { clearTranscript, currentSubtitle, emptyTranscript, type Lang } from "./subtitles";
@@ -22,6 +22,13 @@ const ERROR_MSG: Record<Exclude<ErrorKind, "expired">, string> = {
   network: MSG.MSG05,
   service: MSG.MSG10,
 };
+
+const mics = new WeakMap<AudioContext, SharedMic>();
+function micFor(ctx: AudioContext): SharedMic {
+  let mic = mics.get(ctx);
+  if (!mic) mics.set(ctx, (mic = new SharedMic(ctx)));
+  return mic;
+}
 
 /** Must be called inside the click handler so iOS lets the context run. */
 function newAudioContext(): AudioContext {
@@ -126,7 +133,7 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
         },
       }).realtime.record({
         model: "stt-rt-v6",
-        source: new PcmMicSource(ctx),
+        source: micFor(ctx).source(),
         audio_format: "pcm_s16le",
         sample_rate: ctx.sampleRate,
         num_channels: 1,
