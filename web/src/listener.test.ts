@@ -1,4 +1,4 @@
-import { beforeEach, expect, test } from "vitest";
+import { beforeEach, expect, test, vi } from "vitest";
 import { AudioPermissionError, type RealtimeToken } from "@soniox/client";
 import { ApiError } from "./api";
 import { Listener, type ErrorKind, type ListenConfig, type RecordingLike, type Status } from "./listener";
@@ -246,4 +246,19 @@ test("kết quả của recording đã huỷ bị bỏ qua", () => {
   listener.cancel();
   a.emit("result", { tokens: [o("late")] });
   expect(lines("vi")).toEqual([]);
+});
+
+test("stop treo quá 5 giây → huỷ cả nhóm, về idle", async () => {
+  vi.useFakeTimers();
+  try {
+    const [a, b] = listen(cfg(["en", "vi"], "ja"));
+    const done = listener.stop();
+    a.resolveStop();
+    await vi.advanceTimersByTimeAsync(5000);
+    await done;
+    expect(b.canceled).toBe(true);
+    expect(status()).toBe("idle");
+  } finally {
+    vi.useRealTimers();
+  }
 });

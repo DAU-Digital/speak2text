@@ -1,5 +1,6 @@
 // The recording tab publishes the current subtitle of every output language; /sub pages on the
 // same browser listen. A page that opens later says "hello" and gets the latest state at once.
+import { useEffect, useRef } from "react";
 import { isLang, type Lang } from "./languages";
 import type { Subtitle } from "./subtitles";
 
@@ -33,4 +34,25 @@ export function subscribe(lang: Lang, onSub: (sub: Subtitle | null) => void): ()
   };
   ch.postMessage({ type: "hello" } satisfies Message);
   return () => ch.close();
+}
+
+/** Publishes `state` for /sub pages; the channel lives exactly as long as the component. */
+export function useSubtitlePublisher(state: SubtitleState): void {
+  const publisher = useRef<ReturnType<typeof createPublisher> | null>(null);
+  const latest = useRef(state);
+  latest.current = state;
+
+  useEffect(() => {
+    const p = createPublisher();
+    publisher.current = p;
+    p.publish(latest.current);
+    return () => {
+      p.close();
+      if (publisher.current === p) publisher.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    publisher.current?.publish(state);
+  }, [state]);
 }

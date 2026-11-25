@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import { SonioxClient } from "@soniox/client";
-import { ApiError, fetchSttKey, login } from "./api";
-import { createPublisher } from "./broadcast";
+import { ApiError, fetchSttKey, login, retriableForSdk } from "./api";
+import { useSubtitlePublisher } from "./broadcast";
 import { floatingSupported, useFloatingWindow } from "./floatingWindow";
 import { isLang, LANGS, langShort, sanitizeTargets, type Lang } from "./languages";
 import { Listener, type ErrorKind, type Status } from "./listener";
@@ -135,9 +135,6 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
   const expired = useRef(onExpired);
   expired.current = onExpired;
 
-  const publisher = useRef<ReturnType<typeof createPublisher> | null>(null);
-  publisher.current ??= createPublisher();
-
   const listener = useRef<Listener | null>(null);
   listener.current ??= new Listener({
     createRecording: (src, target, ctx, noteApiError) =>
@@ -147,7 +144,7 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
             return { api_key: await fetchSttKey(token) };
           } catch (err) {
             if (err instanceof ApiError) noteApiError(err);
-            throw err;
+            throw retriableForSdk(err);
           }
         },
       }).realtime.record({
@@ -206,16 +203,13 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
     window.open(`/sub?lang=${l}`, `s2t-sub-${l}`, "popup,width=960,height=180");
   }
 
-  const subs: Partial<Record<Lang, Subtitle | null>> = Object.fromEntries(
-    targets.map((t) => [t, currentSubtitle(transcripts[t] ?? emptyTranscript())]),
+  const subs = useMemo<Partial<Record<Lang, Subtitle | null>>>(
+    () => Object.fromEntries(targets.map((t) => [t, currentSubtitle(transcripts[t] ?? emptyTranscript())])),
+    [targets, transcripts],
   );
   const first = subs[targets[0]] ?? null;
-
-  useEffect(() => {
-    publisher.current!.publish({ source, subs });
-    // subs is derived from these three
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transcripts, source, targets]);
+  const published = useMemo(() => ({ source, subs }), [source, subs]);
+  useSubtitlePublisher(published);
 
   // Keep the screen on while listening; ignore browsers without Wake Lock.
   useEffect(() => {
@@ -232,14 +226,7 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
     };
   }, [status]);
 
-  useEffect(
-    () => () => {
-      listener.current?.cancel();
-      publisher.current?.close();
-      publisher.current = null;
-    },
-    [],
-  );
+  useEffect(() => () => listener.current?.cancel(), []);
 
   const statusText =
     status === "listening"

@@ -1,3 +1,5 @@
+import { NetworkError } from "@soniox/client";
+
 export class ApiError extends Error {
   constructor(public status: number, message?: string) {
     super(message ?? `HTTP ${status}`);
@@ -30,4 +32,16 @@ export function login(passcode: string): Promise<{ token: string; expiresAt: str
 export async function fetchSttKey(token: string): Promise<string> {
   const { apiKey } = await post<{ apiKey: string }>("/api/stt-key", { token });
   return apiKey;
+}
+
+/**
+ * Errors from fetching a temporary key inside the SDK's `config()`: the SDK only retries
+ * NetworkError/ConnectionError, so network drops, 429 and 5xx are wrapped to get its backoff.
+ * 401 stays an ApiError so the app can send the user back to the passcode screen.
+ */
+export function retriableForSdk(err: unknown): unknown {
+  if (err instanceof ApiError && (err.status === 0 || err.status === 429 || err.status >= 500)) {
+    return new NetworkError(`temporary key: ${err.message}`, err.status || undefined, err);
+  }
+  return err;
 }

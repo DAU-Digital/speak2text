@@ -52,6 +52,9 @@ function classify(err: unknown, apiError: ApiError | null, wasReconnecting: bool
   return "service";
 }
 
+/** How long a graceful stop may wait for Soniox to finalize before the group is cancelled. */
+export const STOP_TIMEOUT_MS = 5000;
+
 function closeCtx(ctx: AudioContext) {
   if (ctx.state === "closed") return;
   Promise.resolve(ctx.close()).catch(() => {});
@@ -139,14 +142,21 @@ export class Listener {
     const id = this.gen;
     const recs = this.recs;
     this.setStatus("stopping");
-    await Promise.all(
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<"timeout">((resolve) => {
+      timer = setTimeout(() => resolve("timeout"), STOP_TIMEOUT_MS);
+    });
+    const finished = Promise.all(
       recs.map((r) =>
         r.stop().catch(() => {
           if (this.gen === id) r.cancel();
         }),
       ),
     );
+    const outcome = await Promise.race([finished, timedOut]);
+    clearTimeout(timer);
     if (this.gen !== id) return;
+    if (outcome === "timeout") return this.cancel(); // a session never finished: drop the rest
     this.recs = [];
     this.closeLines();
     this.setStatus("idle");

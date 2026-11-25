@@ -1,5 +1,6 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { ApiError, fetchSttKey, login } from "./api";
+import { NetworkError } from "@soniox/client";
+import { ApiError, fetchSttKey, login, retriableForSdk } from "./api";
 
 const respond = (status: number, body: unknown) =>
   vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify(body), { status }));
@@ -45,4 +46,15 @@ test("login 429 → ApiError status 429", async () => {
 test("mất mạng → ApiError status 0", async () => {
   vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("Failed to fetch"); }));
   await expect(fetchSttKey("tok")).rejects.toMatchObject({ status: 0 });
+});
+
+test("lỗi mạng, 429, 5xx khi xin key → NetworkError để SDK tự thử lại", () => {
+  for (const status of [0, 429, 502, 503]) {
+    expect(retriableForSdk(new ApiError(status))).toBeInstanceOf(NetworkError);
+  }
+});
+
+test("401 giữ nguyên ApiError để báo hết phiên đăng nhập", () => {
+  const err = new ApiError(401);
+  expect(retriableForSdk(err)).toBe(err);
 });
