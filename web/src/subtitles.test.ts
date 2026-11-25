@@ -37,7 +37,7 @@ describe.skipIf(!traceEn)("trace EN thật", () => {
     expect(done).toHaveLength(2);
     expect(done[0].original).toMatch(/good morning/i);
     expect(done[1].original).toMatch(/product/i);
-    expect(done.every((l) => l.vi.trim().length > 0)).toBe(true);
+    expect(done.every((l) => l.translation.trim().length > 0)).toBe(true);
   });
 });
 
@@ -47,7 +47,7 @@ describe.skipIf(!traceJa)("trace JA thật", () => {
     expect(done).toHaveLength(2);
     expect(done[0].original).toMatch(/おはよう/);
     expect(done[1].original).toMatch(/新製品/);
-    expect(done.every((l) => l.vi.trim().length > 0)).toBe(true);
+    expect(done.every((l) => l.translation.trim().length > 0)).toBe(true);
   });
 });
 
@@ -55,11 +55,11 @@ describe("applyTokens", () => {
   test("token chưa final chỉ vào interim và bị thay ở lần sau", () => {
     let t = run([[po("Hel"), pv("Xin")]]);
     expect(t.interimOriginal).toBe("Hel");
-    expect(t.interimVi).toBe("Xin");
+    expect(t.interimTranslation).toBe("Xin");
     expect(t.lines).toEqual([]);
     t = run([[po("Hello")]], "en", t);
     expect(t.interimOriginal).toBe("Hello");
-    expect(t.interimVi).toBe("");
+    expect(t.interimTranslation).toBe("");
   });
 
   test("<end> chốt dòng", () => {
@@ -75,18 +75,18 @@ describe("applyTokens", () => {
   test("bản dịch về trước <end> → vào dòng đang mở", () => {
     const t = run([[o("Hi"), v("Chào")], [end()]]);
     expect(t.lines).toHaveLength(1);
-    expect(t.lines[0]).toMatchObject({ original: "Hi", vi: "Chào", closed: true });
+    expect(t.lines[0]).toMatchObject({ original: "Hi", translation: "Chào", closed: true });
   });
 
   test("token dịch về sau <end> → gắn vào dòng vừa chốt", () => {
     const t = run([[o("Hi"), end()], [v("Chào")]]);
     expect(t.lines).toHaveLength(1);
-    expect(t.lines[0].vi).toBe("Chào");
+    expect(t.lines[0].translation).toBe("Chào");
   });
 
   test("câu thứ hai mở dòng mới", () => {
     const t = run([[o("Hi"), v("Chào"), end()], [o(" Bye"), v("Tạm biệt"), end()]]);
-    expect(t.lines.map((l) => [l.original, l.vi])).toEqual([
+    expect(t.lines.map((l) => [l.original, l.translation])).toEqual([
       ["Hi", "Chào"],
       [" Bye", "Tạm biệt"],
     ]);
@@ -97,6 +97,12 @@ describe("applyTokens", () => {
     expect(t.lines).toHaveLength(2);
     expect(t.lines[0]).toMatchObject({ original: "あ".repeat(70), closed: true });
     expect(t.lines[1]).toMatchObject({ original: "い", closed: false });
+  });
+
+  test("vượt 100 ký tự KO → chốt dòng", () => {
+    const t = run([[o("가".repeat(100)), o("나")]], "ko");
+    expect(t.lines).toHaveLength(2);
+    expect(t.lines[0].closed).toBe(true);
   });
 
   test("vượt 180 ký tự EN → chốt dòng", () => {
@@ -141,7 +147,7 @@ describe("closeOpenLine", () => {
     expect(t.lines).toHaveLength(1);
     expect(t.lines[0]).toMatchObject({ original: "Half of", closed: true });
     expect(t.interimOriginal).toBe("");
-    expect(t.interimVi).toBe("");
+    expect(t.interimTranslation).toBe("");
   });
 
   test("câu sau khi chốt bằng closeOpenLine mở dòng mới", () => {
@@ -161,7 +167,7 @@ describe("clearTranscript", () => {
     const t = clearTranscript(before);
     expect(t.lines).toEqual([]);
     expect(t.interimOriginal).toBe("");
-    expect(t.interimVi).toBe("");
+    expect(t.interimTranslation).toBe("");
     expect(t.nextId).toBe(before.nextId);
   });
 
@@ -185,17 +191,17 @@ describe("currentSubtitle", () => {
 
   test("dòng đang mở cộng chữ tạm", () => {
     const t = run([[o("Hello"), v("Xin"), po(" wor"), pv(" chào")]]);
-    expect(currentSubtitle(t)).toEqual({ original: "Hello wor", vi: "Xin chào", live: true });
+    expect(currentSubtitle(t)).toEqual({ original: "Hello wor", translation: "Xin chào", live: true });
   });
 
   test("câu đã chốt, chưa có chữ mới → hiện câu đó", () => {
     const t = run([[o(" Hi "), v("Chào"), end()]]);
-    expect(currentSubtitle(t)).toEqual({ original: "Hi", vi: "Chào", live: false });
+    expect(currentSubtitle(t)).toEqual({ original: "Hi", translation: "Chào", live: false });
   });
 
   test("câu mới bắt đầu (chỉ có chữ tạm) → thay câu cũ", () => {
     const t = run([[o("Hi"), v("Chào"), end()], [po("Next")]]);
-    expect(currentSubtitle(t)).toEqual({ original: "Next", vi: "", live: true });
+    expect(currentSubtitle(t)).toEqual({ original: "Next", translation: "", live: true });
   });
 
   test("sau khi xoá → null", () => {

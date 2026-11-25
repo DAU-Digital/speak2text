@@ -1,6 +1,4 @@
-import type { Lang } from "./subtitles";
-
-const langName = (lang: Lang) => (lang === "en" ? "tiếng Anh" : "tiếng Nhật");
+import { langName, type Lang } from "./languages";
 
 // Copy from the spec, section 5 (MSG-06 and MSG-07 are out of scope). MSG-03 reworded with the user on 2026-11-25.
 export const MSG = {

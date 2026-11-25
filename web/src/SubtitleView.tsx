@@ -30,11 +30,11 @@ function OneRow({ text, className }: { text: string; className: string }) {
   );
 }
 
-/** Vietnamese on top, original speech below — a single subtitle, never a list. */
+/** Translation on top, original speech below — a single subtitle, never a list. */
 export function SubtitleView({ sub, floating = false }: { sub: Subtitle | null; floating?: boolean }) {
   return (
     <div className={floating ? "sub floating" : "sub"} aria-live="polite">
-      <OneRow className="vi" text={sub?.vi ?? ""} />
+      <OneRow className="tr" text={sub?.translation ?? ""} />
       <OneRow className="orig" text={sub?.original ?? ""} />
     </div>
   );

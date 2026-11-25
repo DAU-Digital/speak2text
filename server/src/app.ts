@@ -16,7 +16,7 @@ const SESSION_MS = 30 * 24 * 3600 * 1000;
 export function createApp(deps: AppDeps): express.Express {
   const now = deps.now ?? Date.now;
   const guard = createLoginGuard({ maxFails: 5, lockMs: 5 * 60 * 1000 });
-  const keyLimiter = createKeyLimiter({ max: 10, windowMs: 60_000 });
+  const keyLimiter = createKeyLimiter({ max: 30, windowMs: 60_000 });
 
   const app = express();
   app.set("trust proxy", 1);

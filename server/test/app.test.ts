@@ -134,11 +134,11 @@ describe("stt-key", () => {
     expect(res.body).toEqual({ apiKey: "tmp-123", expiresAt: "2026-11-25T00:01:00Z" });
   });
 
-  test("key thứ 11 trong một phút → 429", async () => {
+  test("key thứ 31 trong một phút → 429", async () => {
     const app = makeApp();
     const token = await tokenFor(app);
     const call = () => request(app).post("/api/stt-key").set("Authorization", `Bearer ${token}`);
-    for (let i = 0; i < 10; i++) expect((await call()).status).toBe(200);
+    for (let i = 0; i < 30; i++) expect((await call()).status).toBe(200);
     const res = await call();
     expect(res.status).toBe(429);
     expect(res.body.error).toBe("rate_limited");
