@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { AudioPermissionError } from "@soniox/client";
+import { micLevel } from "./audioLevel";
 import { SharedMic } from "./sharedMic";
 
 type FakeNode = { name: string; connect: ReturnType<typeof vi.fn>; disconnect: ReturnType<typeof vi.fn>; gain?: { value: number } };
@@ -94,6 +95,16 @@ test("khối PCM tới cả hai source", async () => {
   (worklet.port.onmessage as (e: { data: ArrayBuffer }) => void)({ data: buf });
   expect(h1.onData).toHaveBeenCalledWith(buf);
   expect(h2.onData).toHaveBeenCalledWith(buf);
+});
+
+test("khối PCM cập nhật mức âm lượng; tắt micro thì về 0", async () => {
+  const mic = new SharedMic(ctx);
+  const src = mic.source();
+  await src.start(handlers());
+  (worklet.port.onmessage as (e: { data: ArrayBuffer }) => void)({ data: new Int16Array([16384, -16384]).buffer });
+  expect(micLevel.current).toBeCloseTo(0.5, 2);
+  src.stop();
+  expect(micLevel.current).toBe(0);
 });
 
 test("stop một source thì micro vẫn chạy; stop source cuối mới đóng ctx", async () => {

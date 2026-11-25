@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import { SonioxClient } from "@soniox/client";
 import { ApiError, fetchSttKey, getConfig, login, retriableForSdk } from "./api";
@@ -6,7 +6,9 @@ import { effectiveTargets } from "./demand";
 import { floatingSupported, useFloatingWindow } from "./floatingWindow";
 import { isLang, LANGS, type Lang } from "./languages";
 import { Listener, type ErrorKind, type Status } from "./listener";
-import { tr, useT, type Strings } from "./i18n";
+import { useT, type Strings } from "./i18n";
+import { isMicShortcut } from "./shortcuts";
+import { loadScale, saveScale, stepScale } from "./textScale";
 import { createRoomPublisher } from "./publisher";
 import { SharedMic } from "./sharedMic";
 import { connectHost, normalizeRoomCode, roomLink, type LinkStatus } from "./roomClient";
@@ -18,10 +20,13 @@ import {
   ClearIcon,
   ColumnHead,
   LeaveIcon,
-  LinkIcon,
+  QrIcon,
   MicIcon,
   SplitLayout,
+  MicMeter,
+  ShareDialog,
   StopIcon,
+  TextSizeControl,
   UiLangSwitch,
   WindowIcon,
 } from "./ui";
@@ -99,6 +104,8 @@ export default function App() {
   const [loginMsg, setLoginMsg] = useState<Msg | null>(null);
   // null = still asking the server; "" token = open mode (no passcode configured)
   const [passcodeRequired, setPasscodeRequired] = useState<boolean | null>(null);
+  // Set when the passcode form also carried a room code: open that room right away.
+  const [autoOpen, setAutoOpen] = useState(false);
 
   useEffect(() => {
     if (token) return;
@@ -131,6 +138,7 @@ export default function App() {
           localStorage.setItem(LS.token, t);
           localStorage.setItem(LS.exp, exp);
           setLoginMsg(null);
+          setAutoOpen(true);
           setToken(t);
         }}
       />
@@ -139,6 +147,7 @@ export default function App() {
   return (
     <Main
       token={token}
+      autoOpen={autoOpen}
       onExpired={() => {
         localStorage.removeItem(LS.token);
         localStorage.removeItem(LS.exp);
@@ -152,15 +161,22 @@ export default function App() {
 function Login({ initialMsg, onToken }: { initialMsg: Msg | null; onToken: (token: string, exp: string) => void }) {
   const t = useT();
   const [passcode, setPasscode] = useState("");
+  const [roomInput, setRoomInput] = useState(() => localStorage.getItem(LS.room) ?? "");
   const [msg, setMsg] = useState<Msg | null>(() => initialMsg);
   const [busy, setBusy] = useState(false);
   const input = useRef<HTMLInputElement>(null);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
+    const code = normalizeRoomCode(roomInput);
+    if (!code) {
+      setMsg(() => (x: Strings) => x.roomInvalid);
+      return;
+    }
     setBusy(true);
     try {
       const { token, expiresAt } = await login(passcode);
+      localStorage.setItem(LS.room, code);
       onToken(token, expiresAt);
     } catch (err) {
       const status = err instanceof ApiError ? err.status : 0;
@@ -179,7 +195,7 @@ function Login({ initialMsg, onToken }: { initialMsg: Msg | null; onToken: (toke
         <br />
         <span>{t.welcomeName}</span>
       </h2>
-      <p className="lead">{t.loginLead}</p>
+      <p className="lead">{t.loginOpenLead}</p>
       <label className="eyebrow" htmlFor="passcode">
         {t.passcode}
       </label>
@@ -192,8 +208,20 @@ function Login({ initialMsg, onToken }: { initialMsg: Msg | null; onToken: (toke
         value={passcode}
         onChange={(e) => setPasscode(e.target.value)}
       />
-      <button type="submit" className="btn-primary btn-lg" disabled={busy || !passcode}>
-        {t.enter} <ArrowIcon />
+      <label className="eyebrow" htmlFor="login-room">
+        {t.roomCode}
+      </label>
+      <input
+        id="login-room"
+        placeholder={t.roomPlaceholder}
+        value={roomInput}
+        onChange={(e) => setRoomInput(e.target.value)}
+        autoCapitalize="none"
+        autoCorrect="off"
+        spellCheck={false}
+      />
+      <button type="submit" className="btn-primary btn-lg" disabled={busy || !passcode || !roomInput.trim()}>
+        {t.openRoom} <ArrowIcon />
       </button>
       <p className="error" role="alert">
         {msg?.(t)}
@@ -206,7 +234,7 @@ function Login({ initialMsg, onToken }: { initialMsg: Msg | null; onToken: (toke
 type RoomState = { code: string; link: LinkStatus; opened: boolean };
 const EMPTY = emptyTranscript();
 
-function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
+function Main({ token, autoOpen = false, onExpired }: { token: string; autoOpen?: boolean; onExpired: () => void }) {
   const [source, setSource] = useState<Lang>(loadSource);
   const [hostTargets, setHostTargets] = useState<Lang[]>(loadTargets);
   const [status, setStatus] = useState<Status>("idle");
@@ -222,7 +250,8 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
   const [roomMsg, setRoomMsg] = useState<Msg | null>(null);
   const [viewers, setViewers] = useState(0);
   const [demand, setDemand] = useState<Lang[]>([]);
-  const [shared, setShared] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const [scale, setScale] = useState(loadScale);
   const [eff, setEff] = useState<Lang[]>([]);
   const [tick, setTick] = useState(0);
   const lastWanted = useRef<Partial<Record<Lang, number>>>({});
@@ -353,17 +382,34 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
     setViewers(0);
   }
 
-  async function share() {
-    if (!room) return;
-    const url = roomLink(location.origin, room.code);
-    if (navigator.share) {
-      await navigator.share({ title: tr().shareTitle(room.code), url }).catch(() => {});
-      return;
-    }
-    await navigator.clipboard?.writeText(url).catch(() => {});
-    setShared(true);
-    setTimeout(() => setShared(false), 1500);
+  function stepText(dir: number) {
+    const next = stepScale(scale, dir);
+    saveScale(next);
+    setScale(next);
   }
+
+  // Coming from the passcode form, which already asked for the room code.
+  const autoOpened = useRef(false);
+  useEffect(() => {
+    if (!autoOpen || autoOpened.current) return;
+    autoOpened.current = true;
+    openRoom();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Space toggles the mic (presenters keep a hand on the keyboard).
+  const micRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!isMicShortcut(e)) return;
+      const btn = document.querySelector<HTMLButtonElement>("button.mic");
+      if (!btn || btn.disabled) return;
+      e.preventDefault();
+      micRef.current();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   function changeSource(next: Lang) {
     localStorage.setItem(LS.source, next);
@@ -388,6 +434,8 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
     } else if (status === "listening") void ls.stop();
     else if (status === "reconnecting") ls.cancel();
   }
+
+  micRef.current = onMic;
 
   function clearAll() {
     setTranscripts((ts) => Object.fromEntries(Object.entries(ts).map(([k, t]) => [k, clearTranscript(t)])));
@@ -523,8 +571,8 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
           <UiLangSwitch />
         </div>
         <div className="actions">
-          <button className="btn-primary" onClick={share} disabled={!room.opened}>
-            <LinkIcon /> {shared ? t.copied : t.share}
+          <button className="btn-primary" onClick={() => setSharing(true)} disabled={!room.opened}>
+            <QrIcon /> {t.share}
           </button>
           <button onClick={leaveRoom}>
             <LeaveIcon /> {t.leave}
@@ -557,8 +605,9 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
           ))}
         </div>
         <div className="actions">
-          <button onClick={clearAll}>
-            <ClearIcon /> {t.clear}
+          <TextSizeControl onStep={stepText} />
+          <button onClick={clearAll} aria-label={t.clear} title={t.clear}>
+            <ClearIcon /> <span className="btn-text">{t.clear}</span>
           </button>
           {floatingSupported() && (
             <button className="pip-btn" aria-pressed={!!floating} onClick={toggleFloating}>
@@ -568,7 +617,7 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
         </div>
       </div>
 
-      <main className="cols">
+      <main className="cols" style={{ "--sub-scale": scale } as CSSProperties}>
         {columns.length === 0 && (
           <div className="placeholder">
             <span className="eyebrow">
@@ -594,13 +643,20 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
           onClick={onMic}
           disabled={busy || (status === "idle" && !room.opened)}
           aria-label={status === "idle" ? t.micStart : t.micStop}
+          title={`${status === "idle" ? t.micStart : t.micStop} (${t.micShortcut})`}
         >
           {busy ? <span className="spin" /> : status === "idle" ? <MicIcon /> : <StopIcon />}
         </button>
-        <p className="status" role="status">
-          {statusText}
-        </p>
+        <div className="dock-text">
+          <p className="status" role="status">
+            {statusText}
+          </p>
+          <MicMeter active={status === "listening"} />
+        </div>
       </div>
+      {sharing && (
+        <ShareDialog url={roomLink(location.origin, room.code)} code={room.code} onClose={() => setSharing(false)} />
+      )}
     </div>
   );
 }

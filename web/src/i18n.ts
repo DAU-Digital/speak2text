@@ -88,6 +88,18 @@ const EN = {
   vPickOne: "Choose at least one language to see subtitles.",
   vStarting: (l: Lang) => `Turning on ${EN.langName[l]} translation…`,
   vNoSubs: "No subtitles yet.",
+
+  textSmaller: "Smaller text",
+  textLarger: "Larger text",
+  fullscreen: "Full screen",
+  exitFullscreen: "Exit full screen",
+  scanToWatch: "Scan to watch live subtitles",
+  shareHint: "Show this code on the projector, or send the link. Viewers pick their own language.",
+  copyLink: "Copy link",
+  shareVia: "Share…",
+  close: "Close",
+  micShortcut: "Space",
+  loginOpenLead: "Enter the passcode and a room code to start.",
 };
 
 export type Strings = typeof EN;
@@ -177,6 +189,18 @@ const VI: Strings = {
   vPickOne: "Chọn ít nhất một ngôn ngữ để xem phụ đề.",
   vStarting: (l) => `Đang bật bản dịch ${VI_NAME[l]}…`,
   vNoSubs: "Chưa có phụ đề.",
+
+  textSmaller: "Chữ nhỏ hơn",
+  textLarger: "Chữ to hơn",
+  fullscreen: "Toàn màn hình",
+  exitFullscreen: "Thoát toàn màn hình",
+  scanToWatch: "Quét để xem phụ đề trực tiếp",
+  shareHint: "Chiếu mã này lên màn hình hoặc gửi link. Người xem tự chọn ngôn ngữ.",
+  copyLink: "Chép link",
+  shareVia: "Chia sẻ…",
+  close: "Đóng",
+  micShortcut: "Space",
+  loginOpenLead: "Nhập passcode và mã phòng để bắt đầu.",
 };
 
 const STRINGS: Record<UiLang, Strings> = { en: EN, vi: VI };

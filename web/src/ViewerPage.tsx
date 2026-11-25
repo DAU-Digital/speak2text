@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useT, type Strings } from "./i18n";
 import { isLang, LANGS, type Lang } from "./languages";
 import { connectViewer, normalizeRoomCode, type LinkStatus, type RoomInfo } from "./roomClient";
 import { SubtitleList } from "./SubtitleView";
 import type { DisplayLine } from "./subtitles";
-import { BrandMark, ClearIcon, ColumnHead, UiLangSwitch } from "./ui";
+import { loadScale, saveScale, stepScale } from "./textScale";
+import { BrandMark, ClearIcon, ColumnHead, FullscreenButton, TextSizeControl, UiLangSwitch } from "./ui";
 
 const LS_LANGS = "s2t.viewerLangs";
 
@@ -37,6 +38,13 @@ export function ViewerPage({ code }: { code: string }) {
   const valid = normalizeRoomCode(code) !== null;
   const [fatal, setFatal] = useState<Fatal | null>(valid ? null : "invalid");
   const conn = useRef<ReturnType<typeof connectViewer> | null>(null);
+  const [scale, setScale] = useState(loadScale);
+
+  function stepText(dir: number) {
+    const next = stepScale(scale, dir);
+    saveScale(next);
+    setScale(next);
+  }
 
   useEffect(() => {
     if (!valid) return;
@@ -96,8 +104,8 @@ export function ViewerPage({ code }: { code: string }) {
             <span className="eyebrow">{t.room}</span> {code}
           </span>
           <span className={live ? "pill live" : fatal ? "pill bad" : "pill"}>{status}</span>
-          <UiLangSwitch />
         </div>
+        <UiLangSwitch />
       </header>
       <div className="toolbar">
         <div className="chips" role="group" aria-label={t.show}>
@@ -110,8 +118,10 @@ export function ViewerPage({ code }: { code: string }) {
           ))}
         </div>
         <div className="actions">
-          <button onClick={clear}>
-            <ClearIcon /> {t.clear}
+          <TextSizeControl onStep={stepText} />
+          <FullscreenButton />
+          <button onClick={clear} aria-label={t.clear} title={t.clear}>
+            <ClearIcon /> <span className="btn-text">{t.clear}</span>
           </button>
         </div>
       </div>
@@ -119,7 +129,7 @@ export function ViewerPage({ code }: { code: string }) {
       {langs.length === 0 ? (
         <p className="empty">{t.vPickOne}</p>
       ) : (
-        <main className="cols">
+        <main className="cols" style={{ "--sub-scale": scale } as CSSProperties}>
           {langs.map((l) => {
             const hide = new Set(hidden[l] ?? []);
             const shown = (lines[l] ?? []).filter((x) => !hide.has(x.id));

@@ -1,5 +1,6 @@
 // Shared look in the DAU Digital style: brand mark, split landing layout, line icons.
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { levelToMeter, micLevel } from "./audioLevel";
 import { setUiLang, UI_LANGS, uiLang, useT } from "./i18n";
 import type { Lang } from "./languages";
 
@@ -130,5 +131,154 @@ export function UiLangSwitch() {
         </button>
       ))}
     </div>
+  );
+}
+
+export const QrIcon = () => (
+  <Svg>
+    <rect x="3" y="3" width="7" height="7" />
+    <rect x="14" y="3" width="7" height="7" />
+    <rect x="3" y="14" width="7" height="7" />
+    <path d="M14 14h3v3h-3zM20 14v7M14 20h3" />
+  </Svg>
+);
+const ExpandIcon = () => (
+  <Svg>
+    <path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5" />
+  </Svg>
+);
+const ShrinkIcon = () => (
+  <Svg>
+    <path d="M3 8h5V3M21 8h-5V3M3 16h5v5M21 16h-5v5" />
+  </Svg>
+);
+const CloseIcon = () => (
+  <Svg>
+    <path d="M6 6l12 12M18 6L6 18" />
+  </Svg>
+);
+
+/** Live microphone level bar; reads the level every frame without re-rendering React. */
+export function MicMeter({ active }: { active: boolean }) {
+  const fill = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!active) return;
+    let id = 0;
+    let shown = 0;
+    const frame = () => {
+      // Rise fast, fall slowly, like a VU meter.
+      const target = levelToMeter(micLevel.current);
+      shown = target > shown ? target : shown * 0.9 + target * 0.1;
+      if (fill.current) fill.current.style.transform = `scaleX(${shown})`;
+      id = requestAnimationFrame(frame);
+    };
+    id = requestAnimationFrame(frame);
+    return () => {
+      cancelAnimationFrame(id);
+      if (fill.current) fill.current.style.transform = "scaleX(0)";
+    };
+  }, [active]);
+  return (
+    <div className={active ? "meter on" : "meter"} aria-hidden="true">
+      <span ref={fill} />
+    </div>
+  );
+}
+
+/** A− / A+ for the subtitle text size. */
+export function TextSizeControl({ onStep }: { onStep: (dir: number) => void }) {
+  const t = useT();
+  return (
+    <div className="seg" role="group">
+      <button onClick={() => onStep(-1)} aria-label={t.textSmaller} title={t.textSmaller}>
+        A−
+      </button>
+      <button onClick={() => onStep(1)} aria-label={t.textLarger} title={t.textLarger}>
+        A+
+      </button>
+    </div>
+  );
+}
+
+/** Full-screen toggle for the viewer page (hidden where the browser has no full-screen API, e.g. iPhone). */
+export function FullscreenButton() {
+  const t = useT();
+  const [on, setOn] = useState(!!document.fullscreenElement);
+  useEffect(() => {
+    const sync = () => setOn(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", sync);
+    return () => document.removeEventListener("fullscreenchange", sync);
+  }, []);
+  if (!document.fullscreenEnabled) return null;
+  const toggle = () =>
+    void (on ? document.exitFullscreen() : document.documentElement.requestFullscreen()).catch(() => {});
+  return (
+    <button onClick={toggle} aria-label={on ? t.exitFullscreen : t.fullscreen} title={on ? t.exitFullscreen : t.fullscreen}>
+      {on ? <ShrinkIcon /> : <ExpandIcon />}
+    </button>
+  );
+}
+
+/** Share panel: a large QR code to put on the projector, the link, copy and the system share sheet. */
+export function ShareDialog({ url, code, onClose }: { url: string; code: string; onClose: () => void }) {
+  const t = useT();
+  const dialog = useRef<HTMLDialogElement>(null);
+  const [svg, setSvg] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    dialog.current?.showModal();
+    let alive = true;
+    // Loaded on demand: viewers never open this panel, so they don't download the QR encoder.
+    import("qrcode")
+      .then(({ default: QRCode }) =>
+        QRCode.toString(url, { type: "svg", margin: 0, errorCorrectionLevel: "M", color: { dark: "#0f1729", light: "#ffffff" } }),
+      )
+      .then((s) => alive && setSvg(s))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [url]);
+
+  async function copy() {
+    await navigator.clipboard?.writeText(url).catch(() => {});
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
+
+  return (
+    <dialog
+      ref={dialog}
+      className="share"
+      onClose={onClose}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) dialog.current?.close(); // click on the backdrop
+      }}
+    >
+      <div className="share-body">
+        <button className="share-close" onClick={() => dialog.current?.close()} aria-label={t.close}>
+          <CloseIcon />
+        </button>
+        <span className="eyebrow">{t.scanToWatch}</span>
+        <div className="share-code">
+          {t.room} <strong>{code}</strong>
+        </div>
+        {/* SVG generated locally from our own room URL */}
+        <div className="qr" dangerouslySetInnerHTML={{ __html: svg }} />
+        <p className="share-hint">{t.shareHint}</p>
+        <div className="share-link">
+          <input readOnly value={url} onFocus={(e) => e.currentTarget.select()} aria-label="URL" />
+          <button className="btn-primary" onClick={copy}>
+            <LinkIcon /> {copied ? t.copied : t.copyLink}
+          </button>
+        </div>
+        {typeof navigator.share === "function" && (
+          <button className="share-native" onClick={() => void navigator.share({ title: t.shareTitle(code), url }).catch(() => {})}>
+            {t.shareVia}
+          </button>
+        )}
+      </div>
+    </dialog>
   );
 }

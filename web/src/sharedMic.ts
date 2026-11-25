@@ -1,4 +1,5 @@
 import { AudioPermissionError, type AudioSource, type AudioSourceHandlers } from "@soniox/client";
+import { micLevel, pcmLevel } from "./audioLevel";
 
 // One microphone capture shared by several Soniox sessions (one per output language).
 // Sends raw PCM (pcm_s16le, mono, ctx.sampleRate) rather than the SDK's MediaRecorder source,
@@ -73,6 +74,7 @@ export class SharedMic {
     this.input = this.ctx.createMediaStreamSource(this.stream);
     this.node = new AudioWorkletNode(this.ctx, "pcm-capture");
     this.node.port.onmessage = (e: MessageEvent<ArrayBuffer>) => {
+      micLevel.current = pcmLevel(e.data);
       for (const h of this.subscribers) h.onData(e.data);
     };
     // WebKit only runs nodes reachable from the destination: route through a silent gain.
@@ -91,6 +93,7 @@ export class SharedMic {
 
   private release(): void {
     this.released = true;
+    micLevel.current = 0;
     if (this.node) this.node.port.onmessage = null;
     this.input?.disconnect();
     this.node?.disconnect();
