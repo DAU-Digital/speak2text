@@ -4,7 +4,7 @@ import { SonioxClient } from "@soniox/client";
 import { ApiError, fetchSttKey, getConfig, login, retriableForSdk } from "./api";
 import { effectiveTargets } from "./demand";
 import { floatingSupported, useFloatingWindow } from "./floatingWindow";
-import { isLang, LANGS, langName, langShort, type Lang } from "./languages";
+import { isLang, LANGS, langName, type Lang } from "./languages";
 import { Listener, type ErrorKind, type Status } from "./listener";
 import { MSG } from "./messages";
 import { createRoomPublisher } from "./publisher";
@@ -12,6 +12,18 @@ import { SharedMic } from "./sharedMic";
 import { connectHost, normalizeRoomCode, roomLink, type LinkStatus } from "./roomClient";
 import { SubtitleList } from "./SubtitleView";
 import { clearTranscript, displayLines, emptyTranscript, type DisplayLine, type Transcript } from "./subtitles";
+import {
+  ArrowIcon,
+  BrandMark,
+  ClearIcon,
+  ColumnHead,
+  LeaveIcon,
+  LinkIcon,
+  MicIcon,
+  SplitLayout,
+  StopIcon,
+  WindowIcon,
+} from "./ui";
 
 const LS = {
   token: "s2t.token",
@@ -150,24 +162,35 @@ function Login({ initialMsg, onToken }: { initialMsg: string; onToken: (token: s
   }
 
   return (
-    <form className="login" onSubmit={submit}>
-      <h1>Phụ đề</h1>
+    <SplitLayout>
+    <form className="stack" onSubmit={submit}>
+      <BrandMark />
+      <h2 className="welcome">
+        Chào mừng bạn đến với
+        <br />
+        <span>Phòng phụ đề DAU</span>
+      </h2>
+      <p className="lead">Nhập passcode để mở phòng phụ đề.</p>
+      <label className="eyebrow" htmlFor="passcode">
+        Passcode
+      </label>
       <input
+        id="passcode"
         ref={input}
         type="password"
         autoFocus
         autoComplete="current-password"
-        placeholder="Passcode"
         value={passcode}
         onChange={(e) => setPasscode(e.target.value)}
       />
-      <button type="submit" disabled={busy || !passcode}>
-        Vào
+      <button type="submit" className="btn-primary btn-lg" disabled={busy || !passcode}>
+        Vào <ArrowIcon />
       </button>
       <p className="error" role="alert">
         {msg}
       </p>
     </form>
+    </SplitLayout>
   );
 }
 
@@ -428,85 +451,128 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
               ? "Mở phòng trước, rồi bấm micro để nghe."
               : (error ?? MSG.MSG11(source));
 
+  if (!room) {
+    return (
+      <SplitLayout>
+        <form
+          className="stack"
+          onSubmit={(e) => {
+            e.preventDefault();
+            openRoom();
+          }}
+        >
+          <BrandMark />
+          <h2 className="welcome">
+            Chào mừng bạn đến với
+            <br />
+            <span>Phòng phụ đề DAU</span>
+          </h2>
+          <p className="lead">
+            Nhập một mã phòng tuỳ ý rồi bấm Mở phòng. Người xem mở link chia sẻ và chọn ngôn ngữ muốn đọc.
+          </p>
+          <label className="eyebrow" htmlFor="room-code">
+            Mã phòng
+          </label>
+          <input
+            id="room-code"
+            placeholder="ví dụ: hop-thu-2"
+            value={roomInput}
+            onChange={(e) => setRoomInput(e.target.value)}
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+          />
+          <button type="submit" className="btn-primary btn-lg" disabled={!roomInput.trim()}>
+            Mở phòng <ArrowIcon />
+          </button>
+          {roomMsg && (
+            <p className="error" role="alert">
+              {roomMsg}
+            </p>
+          )}
+        </form>
+        <div className="divider">
+          <span>Cách dùng</span>
+        </div>
+        <ol className="steps">
+          <li>Mở phòng với một mã dễ nhớ.</li>
+          <li>Chọn ngôn ngữ người nói, bấm micro và bắt đầu nói.</li>
+          <li>Bấm Chia sẻ, gửi link cho người xem.</li>
+        </ol>
+      </SplitLayout>
+    );
+  }
+
+  const busy = status === "connecting" || status === "stopping";
   return (
     <div className="screen">
-      <header className="bar">
-        <div className="bar-row">
-          <strong>Phụ đề</strong>
-          {room ? (
-            <div className="room">
-              <span className="room-code">Phòng {room.code}</span>
-              <span className={room.link === "open" ? "pill live" : "pill"}>
-                {room.link === "open" ? `${viewers} người đang xem` : "Đang kết nối phòng…"}
-              </span>
-              <button onClick={share} disabled={!room.opened}>
-                {shared ? "Đã chép link" : "Chia sẻ"}
-              </button>
-              <button onClick={leaveRoom}>Rời phòng</button>
-            </div>
-          ) : (
-            <form
-              className="room"
-              onSubmit={(e) => {
-                e.preventDefault();
-                openRoom();
-              }}
-            >
-              <input
-                aria-label="Mã phòng"
-                placeholder="Mã phòng, ví dụ hop-thu-2"
-                value={roomInput}
-                onChange={(e) => setRoomInput(e.target.value)}
-                autoCapitalize="none"
-                autoCorrect="off"
-                spellCheck={false}
-              />
-              <button type="submit" disabled={!roomInput.trim()}>
-                Mở phòng
-              </button>
-            </form>
-          )}
+      <header className="topbar">
+        <BrandMark />
+        <div className="room">
+          <span className="room-code">
+            <span className="eyebrow">Phòng</span> {room.code}
+          </span>
+          <span className={room.link === "open" ? "pill live" : "pill"}>
+            {room.link === "open" ? `${viewers} người đang xem` : "Đang kết nối phòng…"}
+          </span>
         </div>
-        {roomMsg && (
-          <p className="error" role="alert">
-            {roomMsg}
-          </p>
-        )}
-        <div className="bar-row">
-          <label className="field">
-            Người nói
-            <select value={source} onChange={(e) => changeSource(e.target.value as Lang)}>
-              {LANGS.map((l) => (
-                <option key={l.code} value={l.code}>
-                  {l.short}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="chips" role="group" aria-label="Dịch sang">
-            <span className="label">Dịch sang</span>
-            {LANGS.filter((l) => l.code !== source).map((l) => (
-              <button key={l.code} aria-pressed={hostTargets.includes(l.code)} onClick={() => toggleTarget(l.code)}>
-                {l.short}
-                {demand.includes(l.code) && <span className="badge">người xem</span>}
-              </button>
-            ))}
-          </div>
-          <div className="chips">
-            <button onClick={clearAll}>Xoá</button>
-            {floatingSupported() && (
-              <button aria-pressed={!!floating} onClick={toggleFloating}>
-                Cửa sổ phụ đề
-              </button>
-            )}
-          </div>
+        <div className="actions">
+          <button className="btn-primary" onClick={share} disabled={!room.opened}>
+            <LinkIcon /> {shared ? "Đã chép link" : "Chia sẻ"}
+          </button>
+          <button onClick={leaveRoom}>
+            <LeaveIcon /> Rời phòng
+          </button>
         </div>
       </header>
+      {roomMsg && (
+        <p className="error banner" role="alert">
+          {roomMsg}
+        </p>
+      )}
+      <div className="toolbar">
+        <label className="field">
+          <span className="eyebrow">Người nói</span>
+          <select value={source} onChange={(e) => changeSource(e.target.value as Lang)}>
+            {LANGS.map((l) => (
+              <option key={l.code} value={l.code}>
+                {l.short}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="chips" role="group" aria-label="Dịch sang">
+          <span className="eyebrow">Dịch sang</span>
+          {LANGS.filter((l) => l.code !== source).map((l) => (
+            <button key={l.code} aria-pressed={hostTargets.includes(l.code)} onClick={() => toggleTarget(l.code)}>
+              {l.short}
+              {demand.includes(l.code) && <span className="badge">người xem</span>}
+            </button>
+          ))}
+        </div>
+        <div className="actions">
+          <button onClick={clearAll}>
+            <ClearIcon /> Xoá
+          </button>
+          {floatingSupported() && (
+            <button className="pip-btn" aria-pressed={!!floating} onClick={toggleFloating}>
+              <WindowIcon /> Cửa sổ phụ đề
+            </button>
+          )}
+        </div>
+      </div>
 
       <main className="cols">
+        {columns.length === 0 && (
+          <div className="placeholder">
+            <span className="eyebrow">Phòng {room.code}</span>
+            <p>Phụ đề sẽ hiện ở đây</p>
+            <span>Bấm micro bên dưới để bắt đầu nghe.</span>
+          </div>
+        )}
         {columns.map(({ lang, mode }) => (
           <section className="col" key={lang}>
-            {columns.length > 1 && <span className="tag">{langShort(lang)}</span>}
+            <ColumnHead lang={lang} original={mode === "original"} />
             <SubtitleList lines={displayLines(transcripts[lang] ?? emptyTranscript())} mode={mode} />
           </section>
         ))}
@@ -514,19 +580,20 @@ function Main({ token, onExpired }: { token: string; onExpired: () => void }) {
       {floating &&
         createPortal(<SubtitleList lines={floatLines} floating mode={columns[0]?.mode} />, floating.document.body)}
 
-      <footer>
-        <p className="status" role="status">
-          {statusText}
-        </p>
+      <div className="dock">
         <button
           className={`mic ${status}`}
           onClick={onMic}
-          disabled={status === "connecting" || status === "stopping" || (status === "idle" && !room?.opened)}
+          disabled={busy || (status === "idle" && !room.opened)}
           aria-label={status === "idle" ? "Bắt đầu nghe" : "Dừng nghe"}
         >
-          {status === "connecting" || status === "stopping" ? "…" : status === "idle" ? "🎤" : "■"}
+          {busy ? <span className="spin" /> : status === "idle" ? <MicIcon /> : <StopIcon />}
         </button>
-      </footer>
+        <p className="status" role="status">
+          {statusText}
+        </p>
+      </div>
     </div>
   );
 }
+

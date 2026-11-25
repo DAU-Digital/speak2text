@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { isLang, LANGS, langName, langShort, type Lang } from "./languages";
+import { isLang, LANGS, langName, type Lang } from "./languages";
 import { connectViewer, normalizeRoomCode, type LinkStatus, type RoomInfo } from "./roomClient";
 import { SubtitleList } from "./SubtitleView";
 import type { DisplayLine } from "./subtitles";
+import { BrandMark, ClearIcon, ColumnHead } from "./ui";
 
 const LS_LANGS = "s2t.viewerLangs";
 
@@ -78,25 +79,34 @@ export function ViewerPage({ code }: { code: string }) {
             ? `Đang nghe ${langName(source)}`
             : "Chủ phòng đang tạm dừng";
 
+  const live = !!info?.listening && link === "open";
   return (
     <div className="screen">
-      <header className="bar">
-        <div className="bar-row">
-          <strong className="room-code">Phòng {code}</strong>
-          <span className={info?.listening && link === "open" ? "pill live" : "pill"}>{status}</span>
-        </div>
-        <div className="bar-row">
-          <div className="chips" role="group" aria-label="Ngôn ngữ muốn xem">
-            {LANGS.map((l) => (
-              <button key={l.code} aria-pressed={langs.includes(l.code)} onClick={() => toggle(l.code)}>
-                {l.short}
-                {l.code === source ? " (gốc)" : ""}
-              </button>
-            ))}
-          </div>
-          <button onClick={clear}>Xoá</button>
+      <header className="topbar">
+        <BrandMark />
+        <div className="room">
+          <span className="room-code">
+            <span className="eyebrow">Phòng</span> {code}
+          </span>
+          <span className={live ? "pill live" : fatal ? "pill bad" : "pill"}>{status}</span>
         </div>
       </header>
+      <div className="toolbar">
+        <div className="chips" role="group" aria-label="Ngôn ngữ muốn xem">
+          <span className="eyebrow">Xem</span>
+          {LANGS.map((l) => (
+            <button key={l.code} aria-pressed={langs.includes(l.code)} onClick={() => toggle(l.code)}>
+              {l.short}
+              {l.code === source && <span className="badge">gốc</span>}
+            </button>
+          ))}
+        </div>
+        <div className="actions">
+          <button onClick={clear}>
+            <ClearIcon /> Xoá
+          </button>
+        </div>
+      </div>
 
       {langs.length === 0 ? (
         <p className="empty">Chọn ít nhất một ngôn ngữ để xem phụ đề.</p>
@@ -108,10 +118,7 @@ export function ViewerPage({ code }: { code: string }) {
             const waiting = !!info?.listening && l !== source && !info.activeLangs.includes(l);
             return (
               <section className="col" key={l}>
-                <span className="tag">
-                  {langShort(l)}
-                  {l === source ? " · gốc" : ""}
-                </span>
+                <ColumnHead lang={l} original={l === source} />
                 {shown.length ? (
                   <SubtitleList lines={shown} mode={l === source ? "original" : "translation"} />
                 ) : (

@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import { parseRoomPath } from "./roomClient";
 import { ViewerPage } from "./ViewerPage";
+import "@fontsource-variable/inter";
 import "./index.css";
 
 const room = parseRoomPath(location.pathname);
