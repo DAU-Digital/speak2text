@@ -1,0 +1,23 @@
+# Runs speak2text behind the VPS's existing jwilder/nginx-proxy + acme companion (network nginx-proxy).
+# From the repo root on the VPS:  docker compose -f deploy/docker-compose.vps.yml up -d --build
+name: speak2text
+
+services:
+  speak2text:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: speak2text:latest
+    container_name: speak2text
+    env_file: ../.env
+    environment:
+      VIRTUAL_HOST: s2t.coregenaihub.com
+      VIRTUAL_PORT: "3000"
+      LETSENCRYPT_HOST: s2t.coregenaihub.com
+    restart: always
+    networks:
+      - nginx-proxy
+
+networks:
+  nginx-proxy:
+    external: true

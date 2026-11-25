@@ -34,49 +34,34 @@ cd server && npx tsx --env-file=../.env scripts/trace.ts en   # và ja
 
 File ghi ra ở `web/src/fixtures/`; khi có file, test `trace EN/JA thật` trong `web/src/subtitles.test.ts` sẽ chạy.
 
-## Nhiều ngôn ngữ và trang chiếu
+## Phòng phụ đề
 
-- **Màn hình ghi âm:** chọn "Người nói" (Anh, Nhật, Việt, Trung, Hàn) và một hoặc nhiều ngôn ngữ "Dịch sang".
-  - Mỗi ngôn ngữ đầu ra là một phiên Soniox riêng, dùng chung micro, nên chi phí nhân theo số ngôn ngữ.
-  - Soniox cho tối đa 10 phiên cùng lúc.
-- **Trang chiếu:** "Mở trang <ngôn ngữ>" mở cửa sổ `/sub?lang=xx`, chỉ hiện phụ đề ngôn ngữ đó (bản dịch ở trên, câu gốc ở dưới).
-  - Kéo cửa sổ sang màn hình hoặc máy chiếu cần dùng.
-  - Trang nhận chữ từ tab ghi âm trên cùng trình duyệt, nên tab ghi âm phải luôn mở.
-- **Đè lên slide toàn màn hình:** dùng "Cửa sổ phụ đề" (ở màn hình ghi âm) hoặc "Nổi lên trên" (ở trang chiếu).
-  - Cửa sổ này luôn nằm trên cùng, chỉ có trên Chrome/Edge máy tính.
-  - Mỗi lúc chỉ mở được một cửa sổ nổi.
-
-## Deploy lên Vercel
-
-Lúc import repo trên Vercel:
-
-| Mục | Giá trị |
-| --- | --- |
-| Application Preset | **Express** |
-| Root Directory | `server` (giữ bật "Include files outside the root directory" vì build cần `web/`) |
-| Build Command | để mặc định (đọc từ `server/vercel.json`: `npm run vercel-build`) |
-
-Environment Variables cho môi trường Production:
-
-| Biến | Giá trị |
-| --- | --- |
-| `SONIOX_API_KEY` | key Soniox |
-| `SESSION_SECRET` | chuỗi ngẫu nhiên ≥ 32 ký tự (bắt buộc: Vercel chạy nhiều instance) |
-| `APP_PASSCODE` | passcode ≥ 8 ký tự, **hoặc** thay bằng `ALLOW_NO_PASSCODE=1` để ai có link cũng dùng được |
-
-Lưu ý:
-- `vercel-build` build `web/` rồi copy vào `server/public/`, và Vercel phục vụ thư mục này qua CDN.
-- `server/src/server.ts` export app cho Vercel (không đặt tên `index.ts`: Vercel sẽ gắn function vào `/` và che mất trang chính).
-- Giới hạn đoán passcode và giới hạn xin key chỉ tính trong từng instance.
+- **Chủ phòng** mở `/`:
+  - gõ mã phòng tuỳ ý (chữ thường, số, `-`, dài 3–32 ký tự), bấm **Mở phòng**, chọn người nói, rồi bấm micro;
+  - bấm **Chia sẻ** để lấy link `/r/<mã>`.
+- **Người xem** mở link, chọn một hoặc nhiều ngôn ngữ. Mỗi ngôn ngữ là một cột: máy tính xếp cột ngang, điện thoại xếp dọc.
+- **Phiên Soniox:**
+  - Ngôn ngữ nào có người xem cần thì máy chủ phòng tự mở phiên cho ngôn ngữ đó. Hết người cần thì phiên tự đóng sau 60 giây.
+  - Mỗi ngôn ngữ là một phiên Soniox, và tài khoản Soniox mặc định cho tối đa 10 phiên cùng lúc, tính chung mọi phòng.
+- **Tab chủ phòng phải luôn mở:** micro và các phiên chạy trên trình duyệt của chủ phòng. Server (`/ws`) chỉ chuyển chữ đi và giữ 50 câu gần nhất của mỗi ngôn ngữ.
+- **Cửa sổ nổi:** nút **Cửa sổ phụ đề** trên máy chủ phòng mở một cửa sổ luôn nằm trên cùng để chiếu đè lên slide (Chrome/Edge máy tính).
 
 ## Deploy lên VPS
 
+VPS hiện tại: `higio@42.115.41.70` (key `~/.ssh/id_ed25519_higio_vps`).
+- VPS có sẵn `jwilder/nginx-proxy` và acme companion trên network `nginx-proxy`, nên HTTPS và WebSocket tự có.
+- Domain: `s2t.coregenaihub.com`, bản ghi A trỏ về `42.115.41.70`.
+
 ```bash
-docker build -t speak2text .
-docker run -d --restart unless-stopped -p 127.0.0.1:3000:3000 --env-file .env --name speak2text speak2text
+# trên máy dev
+rsync -az --delete --exclude node_modules --exclude dist --exclude server/public \
+  --exclude '.env' --exclude '.env.*' --exclude .git --exclude .superpowers --exclude .vercel \
+  -e "ssh -i ~/.ssh/id_ed25519_higio_vps" ./ higio@42.115.41.70:/home/higio/speak2text/
+# trên VPS
+cd /home/higio/speak2text && docker compose -f deploy/docker-compose.vps.yml up -d --build
 ```
 
-Đặt nginx phía trước theo `deploy/nginx.conf.example` và bật HTTPS bằng certbot. Trình duyệt chỉ cho dùng micro trên HTTPS.
+`/home/higio/speak2text/.env` trên VPS chứa `SONIOX_API_KEY`, `SESSION_SECRET` và `ALLOW_NO_PASSCODE=1`. Muốn bật passcode cho chủ phòng thì thay `ALLOW_NO_PASSCODE` bằng `APP_PASSCODE=...` rồi chạy lại lệnh `up -d`.
 
 ## Kiểm tra trên máy thật
 
