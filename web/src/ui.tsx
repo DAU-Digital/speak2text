@@ -4,8 +4,6 @@ import { levelToMeter, micLevel } from "./audioLevel";
 import { setUiLang, UI_LANGS, uiLang, useT } from "./i18n";
 import type { Lang } from "./languages";
 
-const YEAR = new Date().getFullYear();
-
 export function BrandMark() {
   const t = useT();
   return (
@@ -40,14 +38,14 @@ export function SplitLayout({ children }: { children: ReactNode }) {
           </h1>
           <p>{t.heroText}</p>
         </div>
-        <p className="hero-foot">{t.copyright(YEAR)}</p>
+        <p className="hero-foot">{t.copyright}</p>
       </aside>
       <div className="split-main">
         <div className="split-top">
           <UiLangSwitch />
         </div>
         <div className="split-body">{children}</div>
-        <footer className="split-foot">{t.copyright(YEAR)}</footer>
+        <footer className="split-foot">{t.copyright}</footer>
       </div>
     </div>
   );
